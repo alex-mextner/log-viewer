@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 export interface LogEntry {
   level: string;
@@ -46,7 +46,12 @@ export function useLogs({ password, filter, autoRefresh = true }: UseLogsOptions
   const [streaming, setStreaming] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
 
+  // Stable filter key for dependencies
+  const filterKey = JSON.stringify(filter);
+
   const fetchLogs = useCallback(async () => {
+    if (!password) return;
+
     setLoading(true);
     setError(null);
 
@@ -68,12 +73,15 @@ export function useLogs({ password, filter, autoRefresh = true }: UseLogsOptions
     } finally {
       setLoading(false);
     }
-  }, [password, filter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [password, filterKey]);
 
   // Initial fetch
   useEffect(() => {
     if (password) {
       fetchLogs();
+    } else {
+      setLoading(false);
     }
   }, [fetchLogs, password]);
 
@@ -107,7 +115,8 @@ export function useLogs({ password, filter, autoRefresh = true }: UseLogsOptions
       eventSource.close();
       setStreaming(false);
     };
-  }, [autoRefresh, password, filter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoRefresh, password, filterKey]);
 
   return {
     logs,
