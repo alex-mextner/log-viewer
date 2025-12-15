@@ -13,99 +13,63 @@ Default to using Bun instead of Node.js.
 - Use `bun run <script>` instead of `npm run <script>` or `yarn run <script>` or `pnpm run <script>`
 - Bun automatically loads .env, so don't use dotenv.
 
-## APIs
+## Project Structure
 
-- `Bun.serve()` supports WebSockets, HTTPS, and routes. Don't use `express`.
-- `bun:sqlite` for SQLite. Don't use `better-sqlite3`.
-- `Bun.redis` for Redis. Don't use `ioredis`.
-- `Bun.sql` for Postgres. Don't use `pg` or `postgres.js`.
-- `WebSocket` is built-in. Don't use `ws`.
-- Prefer `Bun.file` over `node:fs`'s readFile/writeFile
-- Bun.$`ls` instead of execa.
-
-## Testing
-
-Use `bun test` to run tests.
-
-```ts#index.test.ts
-import { test, expect } from "bun:test";
-
-test("hello world", () => {
-  expect(1).toBe(1);
-});
+```
+src/
+├── index.ts              # Bun server with API routes
+├── App.tsx               # Main React component
+├── lib/
+│   ├── auth.ts           # Password check from ?pwd=
+│   └── logs.ts           # NDJSON parser, filters, tail
+├── hooks/
+│   ├── useLogs.ts        # SSE subscription + fetch
+│   └── useUrlParams.ts   # URL query sync
+└── components/
+    ├── DateFilter.tsx    # Date range filter
+    ├── LevelFilter.tsx   # Log level filter
+    └── LogViewer.tsx     # Log display with auto-scroll
 ```
 
-## Frontend
+## API Endpoints
 
-Use HTML imports with `Bun.serve()`. Don't use `vite`. HTML imports fully support React, CSS, Tailwind.
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/logs?pwd=...` | JSON logs with filters |
+| `GET /api/logs/raw?pwd=...` | Plain text for AI agents |
+| `GET /api/logs/stream?pwd=...` | SSE real-time stream |
 
-Server:
+Query params: `pwd`, `from`, `to`, `level`, `limit`
 
-```ts#index.ts
-import index from "./index.html"
+## Commands
 
-Bun.serve({
-  routes: {
-    "/": index,
-    "/api/users/:id": {
-      GET: (req) => {
-        return new Response(JSON.stringify({ id: req.params.id }));
-      },
-    },
-  },
-  // optional websocket support
-  websocket: {
-    open: (ws) => {
-      ws.send("Hello, world!");
-    },
-    message: (ws, message) => {
-      ws.send(message);
-    },
-    close: (ws) => {
-      // handle close
-    }
-  },
-  development: {
-    hmr: true,
-    console: true,
-  }
-})
+```bash
+bun dev          # Start dev server with HMR
+bun run build    # Build for production
+bun start        # Run production server
 ```
 
-HTML files can import .tsx, .jsx or .js files directly and Bun's bundler will transpile & bundle automatically. `<link>` tags can point to stylesheets and Bun's CSS bundler will bundle.
+## Config
 
-```html#index.html
-<html>
-  <body>
-    <h1>Hello, world!</h1>
-    <script type="module" src="./frontend.tsx"></script>
-  </body>
-</html>
+Environment variables (auto-loaded from .env):
+- `LOG_FILE_PATH` — path to NDJSON log file
+- `LOG_PASSWORD` — API access password
+
+## Log Format
+
+NDJSON with fields: `level`, `time`, `module`, `msg`, plus any extras.
+
+```json
+{"level":"info","time":"2025-12-12T08:00:00Z","module":"scheduler","msg":"Started"}
 ```
 
-With the following `frontend.tsx`:
+## Bun APIs Used
 
-```tsx#frontend.tsx
-import React from "react";
+- `Bun.serve()` with routes for API
+- `Bun.file()` for log reading
+- HTML imports for frontend bundling
+- SSE via ReadableStream
 
-// import .css files directly and it works
-import './index.css';
+## Deploy
 
-import { createRoot } from "react-dom/client";
-
-const root = createRoot(document.body);
-
-export default function Frontend() {
-  return <h1>Hello, world!</h1>;
-}
-
-root.render(<Frontend />);
-```
-
-Then, run index.ts
-
-```sh
-bun --hot ./index.ts
-```
-
-For more information, read the Bun API docs in `node_modules/bun-types/docs/**.md`.
+PM2 config in `ecosystem.config.js`. GitHub Action in `.github/workflows/deploy.yml`.

@@ -17,6 +17,14 @@ jobs:
           username: www-data
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
+            export PATH="$HOME/.bun/bin:$HOME/.local/bin:$PATH"
+
+            # First time setup: clone repo
+            if [ ! -d /var/www/log-viewer/.git ]; then
+              mkdir -p /var/www/log-viewer
+              git clone https://github.com/alex-mextner/log-viewer.git /var/www/log-viewer
+            fi
+
             cd /var/www/log-viewer
 
             # Pull latest changes
@@ -24,7 +32,11 @@ jobs:
             git reset --hard origin/main
 
             # Install dependencies
-            ~/.bun/bin/bun install
+            bun install
+
+            # Create logs dir for PM2
+            mkdir -p logs
 
             # Restart PM2 process
-            pm2 restart log-viewer || pm2 start ecosystem.config.js
+            pm2 restart log-viewer 2>/dev/null || pm2 start ecosystem.config.js
+            pm2 save
