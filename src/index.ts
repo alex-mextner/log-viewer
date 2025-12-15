@@ -156,9 +156,11 @@ const server = serve({
         const filter = parseFilter(url);
         const encoder = new TextEncoder();
 
+        let cleanup: (() => void) | null = null;
+
         const stream = new ReadableStream({
           start(controller) {
-            const cleanup = tailLogs(
+            cleanup = tailLogs(
               filter,
               (entry) => {
                 const data = `data: ${JSON.stringify(entry)}\n\n`;
@@ -168,12 +170,9 @@ const server = serve({
                 controller.close();
               }
             );
-
-            (controller as unknown as { cleanup: () => void }).cleanup = cleanup;
           },
-          cancel(controller) {
-            const c = controller as unknown as { cleanup?: () => void };
-            c.cleanup?.();
+          cancel() {
+            cleanup?.();
           },
         });
 
