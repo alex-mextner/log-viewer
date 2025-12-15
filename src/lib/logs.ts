@@ -70,29 +70,45 @@ export async function readLogs(filter: LogFilter = {}): Promise<{ logs: LogEntry
   }
 
   const limit = filter.limit || 1000;
+  const logs: LogEntry[] = [];
+  let buffer = '';
 
-  // Read only last 500KB to avoid memory issues with large files
-  const stat = await file.stat();
-  const fileSize = stat?.size || 0;
-  const readSize = Math.min(fileSize, 500 * 1024); // 500KB max
-  const startPos = Math.max(0, fileSize - readSize);
+  // Stream file in chunks
+  const stream = file.stream();
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  const allLines: string[] = [];
 
-  const slice = file.slice(startPos, fileSize);
-  const text = await slice.text();
-  const lines = text.split('\n');
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
 
-  // Skip first line if we started mid-file (it's likely incomplete)
-  if (startPos > 0 && lines.length > 0) {
-    lines.shift();
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+      allLines.push(...lines);
+
+      // Keep only recent lines to limit memory (keep last 50k lines max)
+      if (allLines.length > 50000) {
+        allLines.splice(0, allLines.length - 50000);
+      }
+    }
+
+    // Process remaining buffer
+    if (buffer.trim()) {
+      allLines.push(buffer);
+    }
+  } finally {
+    reader.releaseLock();
   }
 
-  const logs: LogEntry[] = [];
-
   // Read from end for most recent logs
-  for (let i = lines.length - 1; i >= 0 && logs.length < limit; i--) {
-    const entry = parseLogLine(lines[i]);
+  for (let i = allLines.length - 1; i >= 0 && logs.length < limit; i--) {
+    const entry = parseLogLine(allLines[i]);
     if (entry && filterLog(entry, filter)) {
-      logs.unshift(entry); // Add to beginning to maintain order
+      logs.unshift(entry);
     }
   }
 
