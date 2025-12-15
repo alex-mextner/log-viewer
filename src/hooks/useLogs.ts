@@ -16,7 +16,7 @@ export interface LogFilter {
 
 interface UseLogsOptions {
   password: string;
-  filter?: LogFilter;
+  filter: LogFilter;
   autoRefresh?: boolean;
 }
 
@@ -28,29 +28,29 @@ interface UseLogsResult {
   streaming: boolean;
 }
 
-function buildUrl(endpoint: string, password: string, filter?: LogFilter): string {
+function buildUrl(endpoint: string, password: string, filter: LogFilter): string {
   const params = new URLSearchParams();
   params.set('pwd', password);
 
-  if (filter?.from) params.set('from', filter.from);
-  if (filter?.to) params.set('to', filter.to);
-  if (filter?.level?.length) params.set('level', filter.level.join(','));
+  if (filter.from) params.set('from', filter.from);
+  if (filter.to) params.set('to', filter.to);
+  if (filter.level?.length) params.set('level', filter.level.join(','));
 
   return `${endpoint}?${params.toString()}`;
 }
 
 export function useLogs({ password, filter, autoRefresh = true }: UseLogsOptions): UseLogsResult {
   const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [streaming, setStreaming] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
 
-  // Stable filter key for dependencies
-  const filterKey = JSON.stringify(filter);
-
   const fetchLogs = useCallback(async () => {
-    if (!password) return;
+    if (!password) {
+      setLoading(false);
+      return;
+    }
 
     setLoading(true);
     setError(null);
@@ -63,7 +63,8 @@ export function useLogs({ password, filter, autoRefresh = true }: UseLogsOptions
         if (res.status === 401) {
           throw new Error('Invalid password');
         }
-        throw new Error(await res.text());
+        const text = await res.text();
+        throw new Error(text || `HTTP ${res.status}`);
       }
 
       const data = await res.json();
@@ -73,17 +74,12 @@ export function useLogs({ password, filter, autoRefresh = true }: UseLogsOptions
     } finally {
       setLoading(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [password, filterKey]);
+  }, [password, filter]);
 
-  // Initial fetch
+  // Initial fetch and on filter change
   useEffect(() => {
-    if (password) {
-      fetchLogs();
-    } else {
-      setLoading(false);
-    }
-  }, [fetchLogs, password]);
+    fetchLogs();
+  }, [fetchLogs]);
 
   // SSE streaming
   useEffect(() => {
@@ -115,8 +111,7 @@ export function useLogs({ password, filter, autoRefresh = true }: UseLogsOptions
       eventSource.close();
       setStreaming(false);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoRefresh, password, filterKey]);
+  }, [autoRefresh, password, filter]);
 
   return {
     logs,

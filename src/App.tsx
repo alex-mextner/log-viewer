@@ -1,6 +1,6 @@
-import { useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { DateFilter } from '@/components/DateFilter';
@@ -15,13 +15,18 @@ export function App() {
   const [passwordInput, setPasswordInput] = useState(params.pwd || '');
   const [password, setPassword] = useState(params.pwd || '');
 
-  const { logs, loading, error, refresh, streaming } = useLogs({
-    password,
-    filter: {
+  const filter = useMemo(
+    () => ({
       from: params.from,
       to: params.to,
       level: params.level,
-    },
+    }),
+    [params.from, params.to, params.level]
+  );
+
+  const { logs, loading, error, refresh, streaming } = useLogs({
+    password,
+    filter,
     autoRefresh: true,
   });
 
