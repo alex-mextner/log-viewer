@@ -1,0 +1,19 @@
+{
+  "apps": [
+    {
+      "name": "log-viewer",
+      "script": "src/index.ts",
+      "interpreter": "/home/www-data/.bun/bin/bun",
+      "env": {
+        "NODE_ENV": "production",
+        "PORT": "3000"
+      },
+      "max_memory_restart": "200M",
+      "watch": false,
+      "error_file": "/var/www/log-viewer/logs/error.log",
+      "out_file": "/var/www/log-viewer/logs/out.log",
+      "merge_logs": true,
+      "time": true
+    }
+  ]
+}

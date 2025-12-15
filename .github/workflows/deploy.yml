@@ -38,5 +38,5 @@ jobs:
             mkdir -p logs
 
             # Restart PM2 process
-            pm2 restart log-viewer 2>/dev/null || pm2 start ecosystem.config.js
+            pm2 restart log-viewer 2>/dev/null || pm2 start ecosystem.config.json
             pm2 save
