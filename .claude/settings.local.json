@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(/Users/ultra/.bun/bin/bun run build:*)"
+      "Bash(/Users/ultra/.bun/bin/bun run build:*)",
+      "Bash(gh run:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push)"
     ]
   }
 }

@@ -38,5 +38,10 @@ jobs:
             mkdir -p logs
 
             # Restart PM2 process
-            pm2 restart log-viewer 2>/dev/null || pm2 start ecosystem.config.json
+            pm2 delete log-viewer 2>/dev/null || true
+            pm2 start ecosystem.config.json
             pm2 save
+
+            # Wait and show logs
+            sleep 2
+            pm2 logs log-viewer --lines 20 --nostream
