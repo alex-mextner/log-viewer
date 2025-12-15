@@ -68,6 +68,68 @@ function getTodayEnd(): Date {
   return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
 }
 
+export async function streamLogs(
+  filter: LogFilter,
+  onEntry: (entry: LogEntry) => void
+): Promise<void> {
+  if (!LOG_FILE_PATH) {
+    throw new Error('LOG_FILE_PATH not configured');
+  }
+
+  const file = Bun.file(LOG_FILE_PATH);
+
+  if (!(await file.exists())) {
+    throw new Error(`Log file not found: ${LOG_FILE_PATH}`);
+  }
+
+  // Default to today if no date range specified
+  const effectiveFilter: LogFilter = {
+    ...filter,
+    from: filter.from ?? getTodayStart(),
+    to: filter.to ?? getTodayEnd(),
+  };
+
+  const limit = effectiveFilter.limit || 1000;
+  let count = 0;
+  let buffer = '';
+
+  const stream = file.stream();
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (count >= limit) break;
+        const entry = parseLogLine(line);
+        if (entry && filterLog(entry, effectiveFilter)) {
+          onEntry(entry);
+          count++;
+        }
+      }
+
+      if (count >= limit) break;
+    }
+
+    // Process remaining buffer
+    if (count < limit && buffer.trim()) {
+      const entry = parseLogLine(buffer);
+      if (entry && filterLog(entry, effectiveFilter)) {
+        onEntry(entry);
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 export async function readLogs(filter: LogFilter = {}): Promise<{ logs: LogEntry[]; hasMore: boolean }> {
   if (!LOG_FILE_PATH) {
     throw new Error('LOG_FILE_PATH not configured');
