@@ -1,5 +1,3 @@
-import { watch } from 'fs';
-
 export interface LogEntry {
   level: string;
   time: string;
@@ -102,47 +100,81 @@ export function formatLogForText(entry: LogEntry): string {
   return `${time} [${entry.level}] ${module}: ${entry.msg}${extras ? ` (${extras})` : ''}`;
 }
 
-export async function* tailLogs(filter: LogFilter = {}): AsyncGenerator<LogEntry> {
+export function tailLogs(
+  filter: LogFilter,
+  onEntry: (entry: LogEntry) => void,
+  onError: (error: Error) => void
+): () => void {
   if (!LOG_FILE_PATH) {
-    throw new Error('LOG_FILE_PATH not configured');
+    onError(new Error('LOG_FILE_PATH not configured'));
+    return () => {};
   }
 
-  const file = Bun.file(LOG_FILE_PATH);
-  let lastSize = (await file.exists()) ? file.size : 0;
+  let lastSize = 0;
   let buffer = '';
+  let aborted = false;
 
-  // Read initial position
-  if (await file.exists()) {
-    const stat = await file.stat();
-    lastSize = stat?.size || 0;
-  }
-
-  while (true) {
-    await Bun.sleep(500); // Poll every 500ms
-
-    if (!(await file.exists())) continue;
-
-    const stat = await file.stat();
-    const currentSize = stat?.size || 0;
-
-    if (currentSize > lastSize) {
-      // Read new content
-      const fileHandle = Bun.file(LOG_FILE_PATH);
-      const slice = fileHandle.slice(lastSize, currentSize);
-      const newContent = await slice.text();
-
-      buffer += newContent;
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || ''; // Keep incomplete line in buffer
-
-      for (const line of lines) {
-        const entry = parseLogLine(line);
-        if (entry && filterLog(entry, filter)) {
-          yield entry;
-        }
-      }
-
-      lastSize = currentSize;
+  const init = async () => {
+    const file = Bun.file(LOG_FILE_PATH);
+    if (await file.exists()) {
+      const stat = await file.stat();
+      lastSize = stat?.size || 0;
     }
-  }
+  };
+
+  const readNewContent = async () => {
+    if (aborted) return;
+
+    try {
+      const file = Bun.file(LOG_FILE_PATH);
+      if (!(await file.exists())) return;
+
+      const stat = await file.stat();
+      const currentSize = stat?.size || 0;
+
+      if (currentSize > lastSize) {
+        const slice = file.slice(lastSize, currentSize);
+        const newContent = await slice.text();
+
+        buffer += newContent;
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const entry = parseLogLine(line);
+          if (entry && filterLog(entry, filter)) {
+            onEntry(entry);
+          }
+        }
+
+        lastSize = currentSize;
+      }
+    } catch (err) {
+      onError(err instanceof Error ? err : new Error(String(err)));
+    }
+  };
+
+  // Use fs.watch for file changes
+  let watcher: ReturnType<typeof import('fs').watch> | null = null;
+
+  const startWatching = async () => {
+    await init();
+    const fs = await import('node:fs');
+
+    watcher = fs.watch(LOG_FILE_PATH, (eventType) => {
+      if (eventType === 'change') {
+        readNewContent();
+      }
+    });
+
+    watcher.on('error', onError);
+  };
+
+  startWatching();
+
+  // Return cleanup function
+  return () => {
+    aborted = true;
+    watcher?.close();
+  };
 }

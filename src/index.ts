@@ -81,19 +81,27 @@ const server = serve({
         if (authError) return authError;
 
         const filter = parseFilter(url);
+        const encoder = new TextEncoder();
 
         const stream = new ReadableStream({
-          async start(controller) {
-            const encoder = new TextEncoder();
-
-            try {
-              for await (const entry of tailLogs(filter)) {
+          start(controller) {
+            const cleanup = tailLogs(
+              filter,
+              (entry) => {
                 const data = `data: ${JSON.stringify(entry)}\n\n`;
                 controller.enqueue(encoder.encode(data));
+              },
+              () => {
+                controller.close();
               }
-            } catch (error) {
-              controller.close();
-            }
+            );
+
+            // Store cleanup for cancel
+            (controller as unknown as { cleanup: () => void }).cleanup = cleanup;
+          },
+          cancel(controller) {
+            const c = controller as unknown as { cleanup?: () => void };
+            c.cleanup?.();
           },
         });
 
