@@ -17,7 +17,7 @@ jobs:
           username: www-data
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            export PATH="$HOME/.bun/bin:$HOME/.local/bin:$PATH"
+            export PATH="$HOME/.bun/bin:$HOME/.local/bin:/var/www/.nvm/versions/node/v22.17.0/bin:$PATH"
 
             # First time setup: clone repo
             if [ ! -d /var/www/log-viewer/.git ]; then
