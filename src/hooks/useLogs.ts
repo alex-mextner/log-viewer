@@ -28,6 +28,17 @@ interface UseLogsResult {
   streaming: boolean;
 }
 
+// Get initial logs injected by server SSR
+function getInitialLogs(): LogEntry[] {
+  if (typeof window !== 'undefined' && Array.isArray((window as { __INITIAL_LOGS__?: LogEntry[] }).__INITIAL_LOGS__)) {
+    const logs = (window as { __INITIAL_LOGS__?: LogEntry[] }).__INITIAL_LOGS__ || [];
+    // Clear after reading to avoid stale data on subsequent renders
+    delete (window as { __INITIAL_LOGS__?: LogEntry[] }).__INITIAL_LOGS__;
+    return logs;
+  }
+  return [];
+}
+
 function buildUrl(endpoint: string, password: string, filter: LogFilter): string {
   const params = new URLSearchParams();
   params.set('pwd', password);
@@ -39,16 +50,36 @@ function buildUrl(endpoint: string, password: string, filter: LogFilter): string
   return `${endpoint}?${params.toString()}`;
 }
 
+// Track if we've used initial logs
+let initialLogsUsed = false;
+
 export function useLogs({ password, filter, autoRefresh = true }: UseLogsOptions): UseLogsResult {
-  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [logs, setLogs] = useState<LogEntry[]>(() => {
+    // Use initial logs from SSR on first mount
+    if (!initialLogsUsed) {
+      const initial = getInitialLogs();
+      if (initial.length > 0) {
+        initialLogsUsed = true;
+        return initial;
+      }
+    }
+    return [];
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [streaming, setStreaming] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
+  const hasInitialLogs = useRef(logs.length > 0);
 
-  const fetchLogs = useCallback(async () => {
+  const fetchLogs = useCallback(async (skipIfHasLogs = false) => {
     if (!password) {
       setLoading(false);
+      return;
+    }
+
+    // Skip fetch if we already have SSR logs (first load only)
+    if (skipIfHasLogs && hasInitialLogs.current) {
+      hasInitialLogs.current = false;
       return;
     }
 
@@ -78,7 +109,7 @@ export function useLogs({ password, filter, autoRefresh = true }: UseLogsOptions
 
   // Initial fetch and on filter change
   useEffect(() => {
-    fetchLogs();
+    fetchLogs(true); // Skip if has initial SSR logs
   }, [fetchLogs]);
 
   // SSE streaming
@@ -117,7 +148,7 @@ export function useLogs({ password, filter, autoRefresh = true }: UseLogsOptions
     logs,
     loading,
     error,
-    refresh: fetchLogs,
+    refresh: () => fetchLogs(false),
     streaming,
   };
 }

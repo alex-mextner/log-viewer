@@ -20,119 +20,81 @@ function parseFilter(url: URL): LogFilter {
 
 const PORT = process.env.PORT || 3000;
 
-const HTML_HEAD = `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Log Viewer</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: ui-monospace, monospace;
-      font-size: 12px;
-      background: #0d1117;
-      color: #c9d1d9;
-      line-height: 1.4;
-    }
-    .log { padding: 2px 8px; border-bottom: 1px solid #21262d; white-space: pre-wrap; word-break: break-all; }
-    .log:hover { background: #161b22; }
-    .time { color: #8b949e; }
-    .level-debug { color: #8b949e; }
-    .level-info { color: #58a6ff; }
-    .level-warn { color: #d29922; }
-    .level-error { color: #f85149; }
-    .module { color: #a5d6ff; }
-    .msg { color: #c9d1d9; }
-    #status {
-      position: fixed;
-      top: 8px;
-      right: 8px;
-      padding: 4px 8px;
-      background: #238636;
-      color: white;
-      border-radius: 4px;
-      font-size: 11px;
-    }
-    #status.error { background: #f85149; }
-  </style>
-</head>
-<body>
-<div id="status">Streaming...</div>
-<div id="logs">`;
+// Read the built HTML template
+const HTML_TEMPLATE_PATH = new URL('../dist/index.html', import.meta.url).pathname;
 
-const HTML_TAIL = `</div>
-<script>
-const evtSource = new EventSource(window.location.href.replace(/\\/$/, '') + '/stream' + window.location.search);
-const logs = document.getElementById('logs');
-const status = document.getElementById('status');
-
-evtSource.onmessage = (e) => {
-  try {
-    const entry = JSON.parse(e.data);
-    const div = document.createElement('div');
-    div.className = 'log';
-    const time = entry.time.replace('T', ' ').substring(0, 19);
-    div.innerHTML = '<span class="time">' + time + '</span> ' +
-      '<span class="level-' + entry.level + '">[' + entry.level.toUpperCase() + ']</span> ' +
-      '<span class="module">' + (entry.module || '-') + ':</span> ' +
-      '<span class="msg">' + escapeHtml(entry.msg) + '</span>';
-    logs.appendChild(div);
-    window.scrollTo(0, document.body.scrollHeight);
-  } catch {}
-};
-
-evtSource.onerror = () => {
-  status.textContent = 'Disconnected';
-  status.className = 'error';
-};
-
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
-</script>
-</body>
+async function getHtmlTemplate(): Promise<string> {
+  const file = Bun.file(HTML_TEMPLATE_PATH);
+  if (await file.exists()) {
+    return file.text();
+  }
+  // Fallback for development
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Log Viewer</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/frontend.tsx"></script>
+  </body>
 </html>`;
-
-function formatLogHtml(entry: { level: string; time: string; module?: string; msg: string }): string {
-  const time = entry.time.replace('T', ' ').substring(0, 19);
-  const msg = entry.msg.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  return `<div class="log"><span class="time">${time}</span> <span class="level-${entry.level}">[${entry.level.toUpperCase()}]</span> <span class="module">${entry.module || '-'}:</span> <span class="msg">${msg}</span></div>\n`;
 }
 
 const server = serve({
   port: Number(PORT),
   hostname: '0.0.0.0',
   routes: {
-    // Main page - streaming HTML with logs
+    // Main page - SSR with initial logs
     '/': {
       async GET(req) {
         const url = new URL(req.url);
         const authError = checkAuth(url);
-        if (authError) return authError;
 
+        const htmlTemplate = await getHtmlTemplate();
+
+        // If no auth, serve without initial logs (login screen will show)
+        if (authError) {
+          return new Response(htmlTemplate, {
+            headers: { 'Content-Type': 'text/html; charset=utf-8' },
+          });
+        }
+
+        // Stream initial logs into HTML
         const filter = parseFilter(url);
         const encoder = new TextEncoder();
 
         const stream = new ReadableStream({
           async start(controller) {
-            // Send HTML head
-            controller.enqueue(encoder.encode(HTML_HEAD));
+            // Insert initial logs script before </head>
+            const scriptStart = '<script>window.__INITIAL_LOGS__=[';
+            const headEnd = '</head>';
+            const parts = htmlTemplate.split(headEnd);
 
-            // Stream existing logs
-            try {
-              await streamLogs(filter, (entry) => {
-                controller.enqueue(encoder.encode(formatLogHtml(entry)));
-              });
-            } catch (err) {
-              const msg = err instanceof Error ? err.message : 'Error';
-              controller.enqueue(encoder.encode(`<div class="log level-error">Error: ${msg}</div>`));
+            if (parts.length === 2) {
+              controller.enqueue(encoder.encode(parts[0] + scriptStart));
+
+              // Stream logs as JSON array elements
+              let first = true;
+              try {
+                await streamLogs(filter, (entry) => {
+                  const prefix = first ? '' : ',';
+                  first = false;
+                  controller.enqueue(encoder.encode(prefix + JSON.stringify(entry)));
+                });
+              } catch (err) {
+                // Log error but continue
+                console.error('Error streaming logs:', err);
+              }
+
+              controller.enqueue(encoder.encode('];</script>' + headEnd + parts[1]));
+            } else {
+              // Fallback - just serve template
+              controller.enqueue(encoder.encode(htmlTemplate));
             }
 
-            // Send HTML tail (includes SSE script)
-            controller.enqueue(encoder.encode(HTML_TAIL));
             controller.close();
           },
         });
@@ -147,7 +109,7 @@ const server = serve({
     },
 
     // SSE stream for real-time updates
-    '/stream': {
+    '/api/logs/stream': {
       async GET(req) {
         const url = new URL(req.url);
         const authError = checkAuth(url);
@@ -231,6 +193,37 @@ const server = serve({
         }
       },
     },
+  },
+
+  // Serve static files from dist/
+  async fetch(req) {
+    const url = new URL(req.url);
+    const pathname = url.pathname;
+
+    // Try to serve from dist/
+    const distPath = new URL('../dist' + pathname, import.meta.url).pathname;
+    const file = Bun.file(distPath);
+
+    if (await file.exists()) {
+      const ext = pathname.split('.').pop() || '';
+      const contentType: Record<string, string> = {
+        js: 'application/javascript',
+        css: 'text/css',
+        svg: 'image/svg+xml',
+        png: 'image/png',
+        ico: 'image/x-icon',
+        map: 'application/json',
+      };
+
+      return new Response(file, {
+        headers: {
+          'Content-Type': contentType[ext] || 'application/octet-stream',
+        },
+      });
+    }
+
+    // 404
+    return new Response('Not Found', { status: 404 });
   },
 
   development: process.env.NODE_ENV !== 'production' && {
