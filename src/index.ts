@@ -19,7 +19,10 @@ function parseFilter(url: URL): LogFilter {
   return filter;
 }
 
+const PORT = process.env.PORT || 3000;
+
 const server = serve({
+  port: Number(PORT),
   routes: {
     // Serve index.html for all unmatched routes
     '/*': index,
