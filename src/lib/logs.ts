@@ -58,6 +58,16 @@ export function filterLog(entry: LogEntry, filter: LogFilter): boolean {
   return true;
 }
 
+function getTodayStart(): Date {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+}
+
+function getTodayEnd(): Date {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+}
+
 export async function readLogs(filter: LogFilter = {}): Promise<{ logs: LogEntry[]; hasMore: boolean }> {
   if (!LOG_FILE_PATH) {
     throw new Error('LOG_FILE_PATH not configured');
@@ -69,15 +79,21 @@ export async function readLogs(filter: LogFilter = {}): Promise<{ logs: LogEntry
     throw new Error(`Log file not found: ${LOG_FILE_PATH}`);
   }
 
-  const limit = filter.limit || 1000;
-  const logs: LogEntry[] = [];
+  // Default to today if no date range specified
+  const effectiveFilter: LogFilter = {
+    ...filter,
+    from: filter.from ?? getTodayStart(),
+    to: filter.to ?? getTodayEnd(),
+  };
+
+  const limit = effectiveFilter.limit || 1000;
+  const matchedEntries: LogEntry[] = [];
   let buffer = '';
 
-  // Stream file in chunks
+  // Stream file in chunks - filter on the fly
   const stream = file.stream();
   const reader = stream.getReader();
   const decoder = new TextDecoder();
-  const allLines: string[] = [];
 
   try {
     while (true) {
@@ -86,35 +102,34 @@ export async function readLogs(filter: LogFilter = {}): Promise<{ logs: LogEntry
 
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
-      buffer = lines.pop() || ''; // Keep incomplete line in buffer
+      buffer = lines.pop() || '';
 
-      allLines.push(...lines);
-
-      // Keep only recent lines to limit memory (keep last 50k lines max)
-      if (allLines.length > 50000) {
-        allLines.splice(0, allLines.length - 50000);
+      for (const line of lines) {
+        const entry = parseLogLine(line);
+        if (entry && filterLog(entry, effectiveFilter)) {
+          matchedEntries.push(entry);
+        }
       }
     }
 
     // Process remaining buffer
     if (buffer.trim()) {
-      allLines.push(buffer);
+      const entry = parseLogLine(buffer);
+      if (entry && filterLog(entry, effectiveFilter)) {
+        matchedEntries.push(entry);
+      }
     }
   } finally {
     reader.releaseLock();
   }
 
-  // Read from end for most recent logs
-  for (let i = allLines.length - 1; i >= 0 && logs.length < limit; i--) {
-    const entry = parseLogLine(allLines[i]);
-    if (entry && filterLog(entry, filter)) {
-      logs.unshift(entry);
-    }
-  }
+  // Return last N entries (most recent)
+  const startIdx = Math.max(0, matchedEntries.length - limit);
+  const logs = matchedEntries.slice(startIdx);
 
   return {
     logs,
-    hasMore: logs.length >= limit,
+    hasMore: matchedEntries.length > limit,
   };
 }
 

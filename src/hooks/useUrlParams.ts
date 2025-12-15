@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 interface UrlParams {
   from?: string;
@@ -7,14 +7,30 @@ interface UrlParams {
   pwd?: string;
 }
 
+function getTodayDateString(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function getDefaultFrom(): string {
+  return `${getTodayDateString()}T00:00`;
+}
+
+function getDefaultTo(): string {
+  return `${getTodayDateString()}T23:59`;
+}
+
 export function useUrlParams(): [UrlParams, (params: Partial<UrlParams>) => void] {
   const [params, setParamsState] = useState<UrlParams>(() => {
     if (typeof window === 'undefined') return {};
 
     const searchParams = new URLSearchParams(window.location.search);
     return {
-      from: searchParams.get('from') || undefined,
-      to: searchParams.get('to') || undefined,
+      from: searchParams.get('from') || getDefaultFrom(),
+      to: searchParams.get('to') || getDefaultTo(),
       level: searchParams.get('level')?.split(',') || undefined,
       pwd: searchParams.get('pwd') || undefined,
     };
