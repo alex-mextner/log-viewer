@@ -1,0 +1,30 @@
+name: Deploy to PM2
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 104.248.84.190
+          username: www-data
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd /var/www/log-viewer
+
+            # Pull latest changes
+            git fetch origin main
+            git reset --hard origin/main
+
+            # Install dependencies
+            ~/.bun/bin/bun install
+
+            # Restart PM2 process
+            pm2 restart log-viewer || pm2 start ecosystem.config.js

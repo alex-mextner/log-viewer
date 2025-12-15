@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(/Users/ultra/.bun/bin/bun run build:*)"
+    ]
+  }
+}
