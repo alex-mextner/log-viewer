@@ -51,4 +51,7 @@ jobs:
 
             # Test API
             echo "Testing API..."
-            curl -s "http://localhost:3001/api/logs?pwd=fglerjt5342354rwer334&limit=2" | head -c 500
+            curl -v "http://localhost:3001/api/logs?pwd=fglerjt5342354rwer334&limit=2" 2>&1 | head -c 1000 || true
+
+            # Check if process is running
+            pm2 status log-viewer
