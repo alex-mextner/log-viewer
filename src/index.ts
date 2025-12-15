@@ -23,6 +23,7 @@ const PORT = process.env.PORT || 3000;
 
 const server = serve({
   port: Number(PORT),
+  hostname: '0.0.0.0',
   routes: {
     // Serve index.html for all unmatched routes
     '/*': index,
