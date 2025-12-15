@@ -48,3 +48,7 @@ jobs:
             # Wait and show logs
             sleep 2
             pm2 logs log-viewer --lines 20 --nostream
+
+            # Test API
+            echo "Testing API..."
+            curl -s "http://localhost:3001/api/logs?pwd=fglerjt5342354rwer334&limit=2" | head -c 500
