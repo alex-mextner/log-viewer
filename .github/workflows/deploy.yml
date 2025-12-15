@@ -31,8 +31,9 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
 
-            # Install dependencies
+            # Install dependencies and build
             bun install
+            bun run build
 
             # Create logs dir for PM2
             mkdir -p logs
