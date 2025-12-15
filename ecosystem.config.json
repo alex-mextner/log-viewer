@@ -3,7 +3,7 @@
     {
       "name": "log-viewer",
       "script": "src/index.ts",
-      "interpreter": "/home/www-data/.bun/bin/bun",
+      "interpreter": "/var/www/.bun/bin/bun",
       "env": {
         "NODE_ENV": "production",
         "PORT": "3000"
