@@ -69,9 +69,22 @@ export async function readLogs(filter: LogFilter = {}): Promise<{ logs: LogEntry
     throw new Error(`Log file not found: ${LOG_FILE_PATH}`);
   }
 
-  const text = await file.text();
-  const lines = text.split('\n');
   const limit = filter.limit || 1000;
+
+  // Read only last 500KB to avoid memory issues with large files
+  const stat = await file.stat();
+  const fileSize = stat?.size || 0;
+  const readSize = Math.min(fileSize, 500 * 1024); // 500KB max
+  const startPos = Math.max(0, fileSize - readSize);
+
+  const slice = file.slice(startPos, fileSize);
+  const text = await slice.text();
+  const lines = text.split('\n');
+
+  // Skip first line if we started mid-file (it's likely incomplete)
+  if (startPos > 0 && lines.length > 0) {
+    lines.shift();
+  }
 
   const logs: LogEntry[] = [];
 

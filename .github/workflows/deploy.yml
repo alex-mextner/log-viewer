@@ -49,9 +49,10 @@ jobs:
             sleep 2
             pm2 logs log-viewer --lines 20 --nostream
 
-            # Test API
+            # Test API (uses password from .env)
             echo "Testing API..."
-            curl -v "http://localhost:3001/api/logs?pwd=fglerjt5342354rwer334&limit=2" 2>&1 | head -c 1000 || true
+            source .env
+            curl -s "http://localhost:3001/api/logs?pwd=$LOG_PASSWORD&limit=2" | head -c 500 || true
 
             # Check if process is running
             pm2 status log-viewer
