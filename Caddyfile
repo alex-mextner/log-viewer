@@ -1,3 +1,5 @@
 log-viewer.invntrm.ru {
-    reverse_proxy localhost:3001
+    reverse_proxy localhost:3001 {
+        flush_interval -1
+    }
 }
