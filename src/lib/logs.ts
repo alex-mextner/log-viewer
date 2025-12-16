@@ -85,8 +85,8 @@ export async function findOffsetForDate(file: ReturnType<typeof Bun.file>, targe
 
     if (newlinePos === -1) {
       // No newline in chunk - either very long line, end of file, or binary data
-      // Try reading a larger chunk to find newline
-      const largerChunkSize = Math.min(65536, fileSize - mid); // 64KB
+      // Try reading a larger chunk to find newline (logs can have huge base64 images)
+      const largerChunkSize = Math.min(4 * 1024 * 1024, fileSize - mid); // 4MB
       if (largerChunkSize > chunkSize) {
         const largerChunk = await file.slice(mid, mid + largerChunkSize).text();
         const largerNewlinePos = largerChunk.indexOf('\n');
@@ -116,9 +116,10 @@ export async function findOffsetForDate(file: ReturnType<typeof Bun.file>, targe
           }
         }
       }
-      // Still no newline or valid entry - move forward
-      console.log(`[bs#${iterations}] mid=${mid}, no newline even in 64KB, low=${mid + largerChunkSize}`);
-      low = mid + largerChunkSize;
+      // Still no newline or valid entry - this region is problematic
+      // Move high down instead of low up to avoid skipping valid entries
+      console.log(`[bs#${iterations}] mid=${mid}, no newline even in 64KB, high=${mid}`);
+      high = mid;
       continue;
     }
 

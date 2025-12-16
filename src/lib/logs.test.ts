@@ -1027,6 +1027,114 @@ describe('findOffsetForDate', () => {
       expect(entryDate!.getUTCDate()).toBe(16);
     });
 
+    // BUG: Very long lines (base64 images) cause "no newline in 64KB" and wrong offset
+    test('REGRESSION: very long JSON lines (base64 images) > 64KB each', async () => {
+      const lines: string[] = [];
+
+      // Dec 1-13: normal entries
+      for (let day = 1; day <= 13; day++) {
+        for (let hour = 0; hour < 24; hour++) {
+          const dd = day.toString().padStart(2, '0');
+          const hh = hour.toString().padStart(2, '0');
+          lines.push(logEntry(`2025-12-${dd}T${hh}:00:00.000Z`, `Normal_${dd}_${hh}`));
+        }
+      }
+
+      // Dec 14: entries with HUGE base64 "images" (100KB each)
+      // These simulate real logs with embedded base64 data
+      const hugeBase64 = 'x'.repeat(100 * 1024); // 100KB of data
+      for (let hour = 0; hour < 24; hour++) {
+        const hh = hour.toString().padStart(2, '0');
+        lines.push(logEntry(`2025-12-14T${hh}:00:00.000Z`, `Image_14_${hh}: ${hugeBase64}`));
+      }
+
+      // Dec 15-16: normal entries after the huge ones
+      for (let day = 15; day <= 16; day++) {
+        for (let hour = 0; hour < 24; hour++) {
+          const dd = day.toString().padStart(2, '0');
+          const hh = hour.toString().padStart(2, '0');
+          lines.push(logEntry(`2025-12-${dd}T${hh}:00:00.000Z`, `Normal_${dd}_${hh}`));
+        }
+      }
+
+      const content = lines.join('\n') + '\n';
+      const { file, size } = await createTestFile('regression_huge_lines.log', content);
+
+      // File should be > 2MB due to huge base64 lines
+      expect(size).toBeGreaterThan(2 * 1024 * 1024);
+
+      // Target: Dec 13 00:00 - BEFORE the huge lines
+      // Binary search might land in huge line zone and fail to find newline
+      const target1 = new Date('2025-12-13T00:00:00.000Z');
+      const result1 = await findOffsetForDate(file, target1, size);
+      const entry1 = parseLogLine(result1.firstLine);
+      expect(entry1).not.toBeNull();
+      expect(parseLogDate(entry1!.time)!.getUTCDate()).toBe(13);
+
+      // Target: Dec 14 12:00 - IN the huge lines zone
+      const target2 = new Date('2025-12-14T12:00:00.000Z');
+      const result2 = await findOffsetForDate(file, target2, size);
+      const entry2 = parseLogLine(result2.firstLine);
+      expect(entry2).not.toBeNull();
+      const date2 = parseLogDate(entry2!.time)!;
+      expect(compareDates(date2, target2)).toBeGreaterThanOrEqual(0);
+      expect(date2.getUTCDate()).toBe(14);
+
+      // Target: Dec 15 00:00 - AFTER the huge lines
+      const target3 = new Date('2025-12-15T00:00:00.000Z');
+      const result3 = await findOffsetForDate(file, target3, size);
+      const entry3 = parseLogLine(result3.firstLine);
+      expect(entry3).not.toBeNull();
+      expect(parseLogDate(entry3!.time)!.getUTCDate()).toBe(15);
+    });
+
+    // BUG: Binary search skips forward when no newline found, missing entries
+    test('REGRESSION: mixed normal and huge lines - binary search must not skip', async () => {
+      const lines: string[] = [];
+
+      // Pattern: normal, huge, normal, huge, normal...
+      // This creates a file where binary search can land anywhere
+      const hugeData = 'y'.repeat(80 * 1024); // 80KB each
+
+      for (let day = 1; day <= 20; day++) {
+        const dd = day.toString().padStart(2, '0');
+        // Morning: normal entries
+        for (let hour = 0; hour < 8; hour++) {
+          const hh = hour.toString().padStart(2, '0');
+          lines.push(logEntry(`2025-12-${dd}T${hh}:00:00.000Z`, `Morning_${dd}_${hh}`));
+        }
+        // Midday: huge entry (simulating image upload log)
+        lines.push(logEntry(`2025-12-${dd}T12:00:00.000Z`, `HugeUpload_${dd}: ${hugeData}`));
+        // Evening: normal entries
+        for (let hour = 18; hour < 24; hour++) {
+          const hh = hour.toString().padStart(2, '0');
+          lines.push(logEntry(`2025-12-${dd}T${hh}:00:00.000Z`, `Evening_${dd}_${hh}`));
+        }
+      }
+
+      const content = lines.join('\n') + '\n';
+      const { file, size } = await createTestFile('regression_mixed_sizes.log', content);
+
+      // Search for various dates - all should work correctly
+      const testDates = [
+        new Date('2025-12-05T00:00:00.000Z'),
+        new Date('2025-12-10T06:00:00.000Z'),
+        new Date('2025-12-10T14:00:00.000Z'), // After a huge entry
+        new Date('2025-12-15T00:00:00.000Z'),
+        new Date('2025-12-18T20:00:00.000Z'),
+      ];
+
+      for (const target of testDates) {
+        const { firstLine } = await findOffsetForDate(file, target, size);
+        const entry = parseLogLine(firstLine);
+        expect(entry).not.toBeNull();
+
+        const entryDate = parseLogDate(entry!.time);
+        expect(entryDate).not.toBeNull();
+        expect(compareDates(entryDate!, target)).toBeGreaterThanOrEqual(0);
+      }
+    });
+
     // This test would have caught the original bug
     test('REGRESSION: large file with target date in first half', async () => {
       const lines: string[] = [];
