@@ -33,6 +33,7 @@ export function App({ initialLogs, initialPassword }: AppProps = {}) {
     password,
     filter,
     autoRefresh: true,
+    initialLogs,
   });
 
   const handleLogin = () => {

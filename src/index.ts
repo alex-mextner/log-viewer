@@ -1,7 +1,8 @@
 import { serve } from 'bun';
+import { readdir } from 'node:fs/promises';
 import { checkAuth } from './lib/auth';
-import { formatLogForText, readLogs, streamLogs, tailLogs, type LogFilter } from './lib/logs';
-import { renderInitialHtml } from './lib/ssr';
+import { formatLogForText, readLogs, tailLogs, type LogFilter } from './lib/logs';
+import { renderAppToStream, renderLoginPage } from './lib/ssr';
 
 function parseFilter(url: URL): LogFilter {
   const filter: LogFilter = {};
@@ -22,71 +23,71 @@ function parseFilter(url: URL): LogFilter {
 }
 
 const PORT = process.env.PORT || 3000;
+const DIST_PATH = new URL('../dist', import.meta.url).pathname;
 
-// Read the built HTML template
-const HTML_TEMPLATE_PATH = new URL('../dist/index.html', import.meta.url).pathname;
+// Find bundled assets (they have hashed names)
+async function findAssets(): Promise<{ cssPath: string; jsPath: string }> {
+  const files = await readdir(DIST_PATH);
+  const cssFile = files.find((f) => f.endsWith('.css')) || 'styles.css';
+  const jsFile = files.find((f) => f.endsWith('.js') && !f.endsWith('.map')) || 'main.js';
+  return {
+    cssPath: '/' + cssFile,
+    jsPath: '/' + jsFile,
+  };
+}
 
-async function getHtmlTemplate(): Promise<string> {
-  const file = Bun.file(HTML_TEMPLATE_PATH);
-  if (await file.exists()) {
-    return file.text();
+// Cache assets paths
+let assetsCache: { cssPath: string; jsPath: string } | null = null;
+async function getAssets() {
+  if (!assetsCache) {
+    assetsCache = await findAssets();
   }
-  // Fallback for development
-  return `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Log Viewer</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/frontend.tsx"></script>
-  </body>
-</html>`;
+  return assetsCache;
 }
 
 const server = serve({
   port: Number(PORT),
   hostname: '0.0.0.0',
   routes: {
-    // Main page - SSR with initial logs
+    // Main page - SSR with streaming
     '/': {
       async GET(req) {
         const url = new URL(req.url);
         const authError = checkAuth(url);
+        const { cssPath, jsPath } = await getAssets();
+        const password = url.searchParams.get('pwd') || '';
 
-        const htmlTemplate = await getHtmlTemplate();
-
-        // If no auth, serve without initial logs (login screen will show)
+        // If no auth, serve login page
         if (authError) {
-          return new Response(htmlTemplate, {
+          const stream = await renderLoginPage(cssPath, jsPath);
+          return new Response(stream, {
             headers: { 'Content-Type': 'text/html; charset=utf-8' },
           });
         }
 
-        // SSR: render logs into HTML
+        // SSR: stream logs as HTML
         const filter = parseFilter(url);
-        let ssrContent = '';
 
         try {
           const result = await readLogs(filter);
-          const logsJson = JSON.stringify(result.logs);
-          ssrContent = renderInitialHtml(result.logs, logsJson);
+          const stream = await renderAppToStream({
+            logs: result.logs,
+            password,
+            cssPath,
+            jsPath,
+          });
+
+          return new Response(stream, {
+            headers: { 'Content-Type': 'text/html; charset=utf-8' },
+          });
         } catch (err) {
           console.error('Error reading logs for SSR:', err);
-          ssrContent = '<div class="p-4 text-center text-red-500">Error loading logs</div>';
+          // Fallback to login page on error
+          const stream = await renderLoginPage(cssPath, jsPath);
+          return new Response(stream, {
+            headers: { 'Content-Type': 'text/html; charset=utf-8' },
+          });
         }
-
-        // Insert SSR content into #root
-        const html = htmlTemplate.replace(
-          '<div id="root"></div>',
-          `<div id="root">${ssrContent}</div>`
-        );
-
-        return new Response(html, {
-          headers: { 'Content-Type': 'text/html; charset=utf-8' },
-        });
       },
     },
 
@@ -193,8 +194,8 @@ const server = serve({
     const pathname = url.pathname;
 
     // Try to serve from dist/
-    const distPath = new URL('../dist' + pathname, import.meta.url).pathname;
-    const file = Bun.file(distPath);
+    const filePath = DIST_PATH + pathname;
+    const file = Bun.file(filePath);
 
     if (await file.exists()) {
       const ext = pathname.split('.').pop() || '';
@@ -210,6 +211,7 @@ const server = serve({
       return new Response(file, {
         headers: {
           'Content-Type': contentType[ext] || 'application/octet-stream',
+          'Cache-Control': 'public, max-age=31536000, immutable',
         },
       });
     }
