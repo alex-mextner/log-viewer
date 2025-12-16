@@ -180,14 +180,19 @@ export function createAppStream({ password, cssPath, jsPath }: SSROptions): {
       controller = c;
       // Send HTML shell IMMEDIATELY on stream creation
       const docStart = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><link rel="icon" type="image/svg+xml" href="/logo.svg"/><title>Log Viewer</title><link rel="stylesheet" href="${cssPath}"/></head><!-- [SSR] shell sent: ${(performance.now() - t0).toFixed(1)}ms --><body><div id="root">`;
-      controller.enqueue(encoder.encode(docStart + beforeLogs));
+      // Loading indicator that will be replaced by first log entry
+      const loadingIndicator = `<div id="ssr-loading" class="flex items-center justify-center p-8 text-muted-foreground"><span class="animate-pulse">Loading logs...</span></div>`;
+      // Padding to force browser flush (some browsers buffer small chunks)
+      const flushPadding = `<!-- ${'x'.repeat(1024)} -->`;
+      controller.enqueue(encoder.encode(docStart + beforeLogs + loadingIndicator + flushPadding));
     },
   });
 
   const sendLogEntry = (entry: LogEntry) => {
     logCount++;
     if (logCount === 1) {
-      controller.enqueue(encoder.encode(`<!-- [SSR] first log: ${(performance.now() - t0).toFixed(1)}ms -->`));
+      // Hide loading indicator, show timing
+      controller.enqueue(encoder.encode(`<script>document.getElementById('ssr-loading')?.remove()</script><!-- [SSR] first log: ${(performance.now() - t0).toFixed(1)}ms -->`));
     }
     controller.enqueue(encoder.encode(logRowToHtml(entry)));
   };
