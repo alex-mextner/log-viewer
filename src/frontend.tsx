@@ -4,7 +4,7 @@
  */
 
 import { StrictMode } from "react";
-import { createRoot, hydrateRoot } from "react-dom/client";
+import { createRoot } from "react-dom/client";
 import { App, type AppProps } from "./App";
 import type { LogEntry } from "./hooks/useLogs";
 
@@ -60,10 +60,8 @@ if (import.meta.hot) {
   // With hot module reloading, `import.meta.hot.data` is persisted.
   const root = (import.meta.hot.data.root ??= createRoot(elem));
   root.render(app);
-} else if (hasSSRContent && password) {
-  // SSR hydration - attach React to server-rendered HTML
-  hydrateRoot(elem, app);
 } else {
-  // Client-only render
+  // Always use createRoot - SSR provides initial data but we re-render completely
+  // This avoids hydration mismatches between SSR shell and React components
   createRoot(elem).render(app);
 }
