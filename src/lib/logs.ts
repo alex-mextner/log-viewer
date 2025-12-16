@@ -71,12 +71,10 @@ export async function findOffsetForDate(file: ReturnType<typeof Bun.file>, targe
 
   let low = 0;
   let high = fileSize;
-  let bestOffset = 0;
-  let bestLine = '';
   let iterations = 0;
 
-  // Binary search for first entry >= targetDate
-  while (high - low > 65536) { // Stop when range is small enough to scan linearly
+  // Binary search to narrow down the range
+  while (high - low > 65536) {
     iterations++;
     const mid = Math.floor((low + high) / 2);
 
@@ -91,12 +89,12 @@ export async function findOffsetForDate(file: ReturnType<typeof Bun.file>, targe
     }
 
     // Get the line AFTER the newline (first complete line)
-    const lineStart = mid + newlinePos + 1;
     const restOfChunk = chunk.slice(newlinePos + 1);
     const nextNewline = restOfChunk.indexOf('\n');
     const line = nextNewline === -1 ? restOfChunk : restOfChunk.slice(0, nextNewline);
 
     if (!line.trim()) {
+      // Empty line, try going left
       high = mid;
       continue;
     }
@@ -117,38 +115,38 @@ export async function findOffsetForDate(file: ReturnType<typeof Bun.file>, targe
 
     if (cmp < 0) {
       // Entry is before target, search in right half
-      low = lineStart;
+      // Move low past this line
+      low = mid + newlinePos + 1;
     } else {
-      // Entry is >= target, this could be our answer, search left for earlier match
+      // Entry is >= target, search in left half
+      // Keep mid in range so we don't skip past the answer
       high = mid;
-      bestOffset = lineStart;
-      bestLine = line;
     }
   }
 
-  // Linear scan in the remaining small range to find exact position
-  if (bestOffset === 0 || low < bestOffset) {
-    const scanStart = low;
-    const scanChunk = await file.slice(scanStart, Math.min(scanStart + 65536 * 2, fileSize)).text();
-    const lines = scanChunk.split('\n');
+  // Linear scan from 'low' to find exact first entry >= targetDate
+  const scanChunk = await file.slice(low, Math.min(low + 65536 * 2, fileSize)).text();
+  const lines = scanChunk.split('\n');
 
-    let offset = scanStart;
-    for (const line of lines) {
-      if (!line.trim()) {
-        offset += line.length + 1;
-        continue;
-      }
-      const entry = parseLogLine(line);
-      if (entry?.time) {
-        const entryDate = parseLogDate(entry.time);
-        if (entryDate && compareDates(entryDate, targetDate) >= 0) {
-          bestOffset = offset;
-          bestLine = line;
-          break;
-        }
-      }
+  let bestOffset = low;
+  let bestLine = '';
+  let offset = low;
+
+  for (const line of lines) {
+    if (!line.trim()) {
       offset += line.length + 1;
+      continue;
     }
+    const entry = parseLogLine(line);
+    if (entry?.time) {
+      const entryDate = parseLogDate(entry.time);
+      if (entryDate && compareDates(entryDate, targetDate) >= 0) {
+        bestOffset = offset;
+        bestLine = line;
+        break;
+      }
+    }
+    offset += line.length + 1;
   }
 
   const foundEntry = parseLogLine(bestLine);
