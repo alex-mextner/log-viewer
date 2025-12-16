@@ -9,7 +9,7 @@ export interface LogEntry {
 }
 
 // Parse date from log entry - handles various formats
-function parseLogDate(timeStr: string): Date | null {
+export function parseLogDate(timeStr: string): Date | null {
   if (!timeStr) return null;
   try {
     // Try ISO format first (most common)
@@ -25,7 +25,7 @@ function parseLogDate(timeStr: string): Date | null {
 }
 
 // Compare dates: returns -1 if a < b, 0 if equal, 1 if a > b
-function compareDates(a: Date, b: Date): number {
+export function compareDates(a: Date, b: Date): number {
   if (isBefore(a, b)) return -1;
   if (isAfter(a, b)) return 1;
   return 0;
@@ -66,7 +66,7 @@ function isCacheValidForDate(cache: OffsetCache, fromDate: Date): boolean {
 }
 
 // Binary search to find byte offset where entries >= targetDate start
-async function findOffsetForDate(file: ReturnType<typeof Bun.file>, targetDate: Date, fileSize: number): Promise<{ offset: number; firstLine: string }> {
+export async function findOffsetForDate(file: ReturnType<typeof Bun.file>, targetDate: Date, fileSize: number): Promise<{ offset: number; firstLine: string }> {
   const t0 = performance.now();
 
   let low = 0;
