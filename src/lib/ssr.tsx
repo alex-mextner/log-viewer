@@ -194,18 +194,17 @@ export function createAppStream({ password, cssPath, jsPath }: SSROptions): {
   sendEnd: (logsCount: number) => void;
 } {
   const encoder = new TextEncoder();
-  let controller: ReadableStreamDefaultController<Uint8Array>;
+  // biome-ignore lint: Bun direct stream controller type
+  let controller: any = null;
   const t0 = performance.now();
   let logCount = 0;
+  let shellSent = false;
 
   // Get cached shell HTML (instant, no renderToString)
   const { beforeLogs, afterLogs } = getShellHtml();
 
-  const stream = new ReadableStream<Uint8Array>({
-    start(c) {
-      controller = c;
-      // Send HTML shell IMMEDIATELY on stream creation
-      const paramsDoc = `<!--
+  // Build shell HTML
+  const paramsDoc = `<!--
   FOR AI AGENTS:
   DO NOT use /api/logs (JSON) - it may fail with large responses.
   USE /api/logs/raw (plain text) - optimized for AI consumption.
@@ -226,32 +225,48 @@ export function createAppStream({ password, cssPath, jsPath }: SSROptions): {
 
   Example: /api/logs/raw?pwd=XXX&from=2025-12-15T00:00&module=scheduler&limit=100
 -->`;
-      const docStart = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><link rel="icon" type="image/svg+xml" href="/logo.svg"/><title>Log Viewer</title><link rel="stylesheet" href="${cssPath}"/></head>${paramsDoc}<!-- [SSR] shell sent: ${(performance.now() - t0).toFixed(1)}ms --><body><div id="root">`;
-      // Loading indicator that will be replaced by first log entry
-      const loadingIndicator = `<div id="ssr-loading" class="flex items-center justify-center p-8 text-muted-foreground"><span class="animate-pulse">Loading logs...</span></div>`;
-      controller.enqueue(encoder.encode(docStart + beforeLogs + loadingIndicator));
+  const docStart = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><link rel="icon" type="image/svg+xml" href="/logo.svg"/><title>Log Viewer</title><link rel="stylesheet" href="${cssPath}"/></head>${paramsDoc}<!-- [SSR] shell sent: ${(performance.now() - t0).toFixed(1)}ms --><body><div id="root">`;
+  const loadingIndicator = `<div id="ssr-loading" class="flex items-center justify-center p-8 text-muted-foreground"><span class="animate-pulse">Loading logs...</span></div>`;
+  const shellHtml = docStart + beforeLogs + loadingIndicator;
+
+  // Use Bun's direct stream with explicit flush() for immediate delivery
+  // See: https://github.com/oven-sh/bun/discussions/13923
+  const stream = new ReadableStream({
+    type: 'direct' as const,
+    pull(c: { write: (data: Uint8Array) => void; flush: () => void; close: () => void }) {
+      controller = c;
+      // Send shell immediately on first pull and flush
+      if (!shellSent) {
+        shellSent = true;
+        controller.write(encoder.encode(shellHtml));
+        controller.flush();
+      }
+      // Return never-resolving promise to keep stream open for sendLogEntry/sendEnd
+      return new Promise(() => {});
     },
-  });
+  } as unknown as UnderlyingDefaultSource<Uint8Array>);
 
   const sendLogEntry = (entry: LogEntry) => {
+    if (!controller) return;
     logCount++;
     if (logCount === 1) {
-      // Hide loading indicator, show timing
-      controller.enqueue(
+      controller.write(
         encoder.encode(
           `<script>document.getElementById('ssr-loading')?.remove()</script><!-- [SSR] first log: ${(performance.now() - t0).toFixed(1)}ms -->`
         )
       );
+      controller.flush();
     }
-    controller.enqueue(encoder.encode(logRowToHtml(entry)));
+    controller.write(encoder.encode(logRowToHtml(entry)));
+    controller.flush();
   };
 
   const sendEnd = (logsCount: number) => {
+    if (!controller) return;
     const timing = `<!-- [SSR] stream end: ${(performance.now() - t0).toFixed(1)}ms, ${logsCount} entries -->`;
-    // Password stored in data attribute for hydration
     const docEnd = `${timing}${afterLogs}</div><script>window.__SSR_PASSWORD__="${password}";window.__SSR_LOGS_COUNT__=${logsCount};</script><script type="module" src="${jsPath}" async></script></body></html>`;
 
-    controller.enqueue(encoder.encode(docEnd));
+    controller.write(encoder.encode(docEnd));
     controller.close();
   };
 

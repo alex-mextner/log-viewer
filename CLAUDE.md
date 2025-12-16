@@ -96,3 +96,4 @@ Flow: Request → Auth check → Stream HTML shell → Stream log rows → Close
 ## Deploy
 
 PM2 config in `ecosystem.config.js`. GitHub Action in `.github/workflows/deploy.yml`.
+Reverse proxy: **Caddy** (not nginx). Config: `Caddyfile` (flush_interval -1 for streaming).

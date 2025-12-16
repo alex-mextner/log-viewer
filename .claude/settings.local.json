@@ -19,7 +19,9 @@
       "Bash(bunx husky:*)",
       "Bash(bun run lint:*)",
       "Bash(bunx biome:*)",
-      "Bash(bun run lint:fix:*)"
+      "Bash(bun run lint:fix:*)",
+      "Bash(ssh www-data@104.248.84.190 'cat /home/www-data/log-viewer/.env 2>/dev/null || cat /var/www/log-viewer/.env 2>/dev/null || find /home -name \"\".env\"\" -path \"\"*log-viewer*\"\" 2>/dev/null | head -3')",
+      "Bash(ssh www-data@104.248.84.190 'time curl -s --no-buffer \"\"http://localhost:3001/?pwd=fglerjt5342354rwer334&from=2025-12-16T00:00\"\" 2>&1 | head -c 2000')"
     ]
   }
 }
