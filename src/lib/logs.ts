@@ -35,6 +35,7 @@ export interface LogFilter {
   from?: Date;
   to?: Date;
   level?: string[];
+  module?: string[];
   limit?: number;
   offset?: number;
 }
@@ -299,6 +300,13 @@ export function filterLog(entry: LogEntry, filter: LogFilter): boolean {
   // Filter by level
   if (filter.level && filter.level.length > 0) {
     if (!filter.level.includes(entry.level)) {
+      return false;
+    }
+  }
+
+  // Filter by module
+  if (filter.module && filter.module.length > 0) {
+    if (!entry.module || !filter.module.includes(entry.module)) {
       return false;
     }
   }

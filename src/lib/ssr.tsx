@@ -206,15 +206,25 @@ export function createAppStream({ password, cssPath, jsPath }: SSROptions): {
       controller = c;
       // Send HTML shell IMMEDIATELY on stream creation
       const paramsDoc = `<!--
-  Log Viewer URL Parameters:
-  - pwd: string (required) - API password
-  - from: datetime-local - Start date filter (default: today 00:00)
-  - to: datetime-local - End date filter (default: today 23:59)
-  - level: string - Comma-separated log levels: debug,info,warn,error
-  - limit: number - Entries per page (100, 500, 1000, 5000)
-  - page: number - Page number (starts from 1, only with limit)
+  FOR AI AGENTS:
+  DO NOT use /api/logs (JSON) - it may fail with large responses.
+  USE /api/logs/raw (plain text) - optimized for AI consumption.
 
-  Example: ?pwd=xxx&from=2025-12-10T00:00&to=2025-12-16T23:59&limit=100&page=2
+  API Endpoints:
+  - /api/logs/raw?pwd=XXX - plain text logs (RECOMMENDED for AI)
+  - /api/logs/stream?pwd=XXX - SSE real-time stream
+  - /api/logs?pwd=XXX - JSON (NOT recommended, may fail)
+
+  Query Parameters:
+  - pwd: string (required) - API password
+  - from: ISO datetime - Start date (e.g., 2025-12-15T00:00)
+  - to: ISO datetime - End date (e.g., 2025-12-15T23:59)
+  - level: string - Comma-separated: debug,info,warn,error
+  - module: string - Comma-separated module names (e.g., scheduler,telegram)
+  - limit: number - Max entries (100, 500, 1000, 5000)
+  - offset: number - Skip N entries for pagination
+
+  Example: /api/logs/raw?pwd=XXX&from=2025-12-15T00:00&module=scheduler&limit=100
 -->`;
       const docStart = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><link rel="icon" type="image/svg+xml" href="/logo.svg"/><title>Log Viewer</title><link rel="stylesheet" href="${cssPath}"/></head>${paramsDoc}<!-- [SSR] shell sent: ${(performance.now() - t0).toFixed(1)}ms --><body><div id="root">`;
       // Loading indicator that will be replaced by first log entry

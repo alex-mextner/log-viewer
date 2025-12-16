@@ -10,12 +10,14 @@ function parseFilter(url: URL): LogFilter {
   const from = url.searchParams.get('from');
   const to = url.searchParams.get('to');
   const level = url.searchParams.get('level');
+  const module = url.searchParams.get('module');
   const limit = url.searchParams.get('limit');
   const offset = url.searchParams.get('offset');
 
   if (from) filter.from = new Date(from);
   if (to) filter.to = new Date(to);
   if (level) filter.level = level.split(',');
+  if (module) filter.module = module.split(',');
   if (limit) filter.limit = parseInt(limit, 10);
   if (offset) filter.offset = parseInt(offset, 10);
 
@@ -231,12 +233,25 @@ const server = serve({
 
           const logsText = result.logs.map(formatLogForText).join('\n');
 
-          // Header with pagination info for AI agents
-          const header = `# Log Viewer API
+          // Header with API documentation for AI agents
+          const header = `# Log Viewer API - For AI Agents
+# =================================
+# RECOMMENDED: Use this endpoint (/api/logs/raw) for AI consumption
+# DO NOT USE: /api/logs (JSON) - may fail with large responses
+#
+# Query Parameters:
+# - pwd: string (required) - API password
+# - from: ISO datetime - Start date (e.g., 2025-12-15T00:00)
+# - to: ISO datetime - End date (e.g., 2025-12-15T23:59)
+# - level: string - Comma-separated: debug,info,warn,error
+# - module: string - Comma-separated module names (e.g., scheduler,telegram)
+# - limit: number - Max entries to return
+# - offset: number - Skip N entries for pagination
+#
+# Current Query Results:
 # Total: ${result.total} entries | Showing: ${result.logs.length} | HasMore: ${result.hasMore}
-# Pagination: ?limit=N&offset=N (default limit=1000, offset=0)
-# Filters: ?from=ISO_DATE&to=ISO_DATE&level=info,warn,error
-# Example: ?limit=100&offset=100 for entries 100-199
+#
+# Example: ?pwd=XXX&from=2025-12-15T00:00&module=scheduler&limit=100
 # ---
 `;
 
