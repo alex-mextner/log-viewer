@@ -15,6 +15,64 @@ const LEVEL_COLORS: Record<string, string> = {
   error: 'text-red-400',
 };
 
+const LEVEL_BG_COLORS: Record<string, string> = {
+  debug: 'bg-gray-500',
+  info: 'bg-blue-500',
+  warn: 'bg-yellow-500',
+  error: 'bg-red-500',
+};
+
+const LEVELS = ['debug', 'info', 'warn', 'error'] as const;
+
+// SSR-only filter components (no handlers, just UI shell)
+function SSRDateFilter() {
+  return (
+    <div className="flex items-center gap-4">
+      <div className="flex items-center gap-2">
+        <label htmlFor="from" className="text-sm whitespace-nowrap">
+          From:
+        </label>
+        <input
+          id="from"
+          type="datetime-local"
+          className="flex h-9 w-48 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
+          readOnly
+        />
+      </div>
+      <div className="flex items-center gap-2">
+        <label htmlFor="to" className="text-sm whitespace-nowrap">
+          To:
+        </label>
+        <input
+          id="to"
+          type="datetime-local"
+          className="flex h-9 w-48 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
+          readOnly
+        />
+      </div>
+    </div>
+  );
+}
+
+function SSRLevelFilter() {
+  return (
+    <div className="flex items-center gap-2">
+      <button className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-xs font-medium bg-primary text-primary-foreground h-9 px-3">
+        All
+      </button>
+      {LEVELS.map((level) => (
+        <button
+          key={level}
+          className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-xs font-medium bg-primary text-primary-foreground h-9 px-3"
+        >
+          <span className={`w-2 h-2 rounded-full ${LEVEL_BG_COLORS[level]}`} />
+          {level.toUpperCase()}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function formatTime(time: string): string {
   try {
     const date = new Date(time);
@@ -76,8 +134,11 @@ function SSRApp({ logs, logsCount }: SSRAppProps) {
             </button>
           </div>
         </div>
-        {/* Filters placeholder - will be hydrated */}
-        <div className="flex flex-wrap items-center gap-4" id="ssr-filters" />
+        {/* Filters - SSR shell, will be hydrated */}
+        <div className="flex flex-wrap items-center gap-4">
+          <SSRDateFilter />
+          <SSRLevelFilter />
+        </div>
       </div>
 
       {/* Log viewer with Suspense for streaming */}
@@ -117,16 +178,16 @@ export async function renderAppToStream({ logs, password, cssPath, jsPath }: SSR
         <link rel="icon" type="image/svg+xml" href="/logo.svg" />
         <title>Log Viewer</title>
         <link rel="stylesheet" href={cssPath} />
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `window.__INITIAL_DATA__=${JSON.stringify(initialData)};`,
-          }}
-        />
       </head>
       <body>
         <div id="root">
           <SSRApp logs={logs} password={password} logsCount={logs.length} />
         </div>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `window.__INITIAL_DATA__=${JSON.stringify(initialData)};`,
+          }}
+        />
         <script type="module" src={jsPath} async />
       </body>
     </html>,
