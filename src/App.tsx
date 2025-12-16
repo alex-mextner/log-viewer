@@ -1,13 +1,13 @@
 import { useMemo, useState } from 'react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { DateFilter } from '@/components/DateFilter';
 import { LevelFilter } from '@/components/LevelFilter';
 import { LogViewer } from '@/components/LogViewer';
 import { Pagination } from '@/components/Pagination';
-import { useLogs, type LogEntry } from '@/hooks/useLogs';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { type LogEntry, useLogs } from '@/hooks/useLogs';
 import { useUrlParams } from '@/hooks/useUrlParams';
 import './index.css';
 
@@ -130,7 +130,9 @@ export function App({ initialLogs, initialPassword }: AppProps = {}) {
 
         {/* Error message */}
         {error && (
-          <div className="bg-destructive/10 text-destructive px-4 py-2 rounded text-sm">{error}</div>
+          <div className="bg-destructive/10 text-destructive px-4 py-2 rounded text-sm">
+            {error}
+          </div>
         )}
       </div>
 
@@ -140,7 +142,9 @@ export function App({ initialLogs, initialPassword }: AppProps = {}) {
         loading={loading}
         streaming={streaming}
         hasData={hasData}
-        showAutoScroll={params.limit === undefined && (!params.to || new Date(params.to) >= new Date())}
+        showAutoScroll={
+          params.limit === undefined && (!params.to || new Date(params.to) >= new Date())
+        }
       />
 
       {/* Pagination - bottom */}

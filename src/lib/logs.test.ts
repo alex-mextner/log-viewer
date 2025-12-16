@@ -1,14 +1,14 @@
-import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
-import { writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  parseLogDate,
   compareDates,
-  findOffsetForDate,
-  parseLogLine,
   filterLog,
+  findOffsetForDate,
   type LogEntry,
   type LogFilter,
+  parseLogDate,
+  parseLogLine,
 } from './logs';
 
 // ============================================================================
@@ -195,14 +195,16 @@ describe('parseLogLine', () => {
     });
 
     test('parses entry with extra fields', () => {
-      const line = '{"level":"info","time":"2025-12-14T10:00:00Z","msg":"test","userId":123,"action":"login"}';
+      const line =
+        '{"level":"info","time":"2025-12-14T10:00:00Z","msg":"test","userId":123,"action":"login"}';
       const entry = parseLogLine(line);
       expect(entry?.userId).toBe(123);
       expect(entry?.action).toBe('login');
     });
 
     test('handles nested objects', () => {
-      const line = '{"level":"info","time":"2025-12-14T10:00:00Z","msg":"test","meta":{"key":"value"}}';
+      const line =
+        '{"level":"info","time":"2025-12-14T10:00:00Z","msg":"test","meta":{"key":"value"}}';
       const entry = parseLogLine(line);
       expect(entry?.meta).toEqual({ key: 'value' });
     });
@@ -431,12 +433,12 @@ describe('findOffsetForDate', () => {
 
   describe('small files (linear scan only)', () => {
     test('finds entry in small file', async () => {
-      const content = [
+      const content = `${[
         logEntry('2025-12-12T10:00:00Z'),
         logEntry('2025-12-13T10:00:00Z'),
         logEntry('2025-12-14T10:00:00Z'),
         logEntry('2025-12-15T10:00:00Z'),
-      ].join('\n') + '\n';
+      ].join('\n')}\n`;
 
       const { file, size } = await createTestFile('small.log', content);
       const target = new Date('2025-12-14T00:00:00Z');
@@ -447,10 +449,7 @@ describe('findOffsetForDate', () => {
     });
 
     test('returns offset 0 when target is before all entries', async () => {
-      const content = [
-        logEntry('2025-12-14T10:00:00Z'),
-        logEntry('2025-12-15T10:00:00Z'),
-      ].join('\n') + '\n';
+      const content = `${[logEntry('2025-12-14T10:00:00Z'), logEntry('2025-12-15T10:00:00Z')].join('\n')}\n`;
 
       const { file, size } = await createTestFile('before_all.log', content);
       const target = new Date('2025-12-01T00:00:00Z');
@@ -462,10 +461,7 @@ describe('findOffsetForDate', () => {
     });
 
     test('returns last valid position when target is after all entries', async () => {
-      const content = [
-        logEntry('2025-12-12T10:00:00Z'),
-        logEntry('2025-12-13T10:00:00Z'),
-      ].join('\n') + '\n';
+      const content = `${[logEntry('2025-12-12T10:00:00Z'), logEntry('2025-12-13T10:00:00Z')].join('\n')}\n`;
 
       const { file, size } = await createTestFile('after_all.log', content);
       const target = new Date('2025-12-20T00:00:00Z');
@@ -476,7 +472,7 @@ describe('findOffsetForDate', () => {
     });
 
     test('handles single entry file', async () => {
-      const content = logEntry('2025-12-14T10:00:00Z') + '\n';
+      const content = `${logEntry('2025-12-14T10:00:00Z')}\n`;
 
       const { file, size } = await createTestFile('single.log', content);
       const target = new Date('2025-12-14T00:00:00Z');
@@ -505,7 +501,7 @@ describe('findOffsetForDate', () => {
         // Pad message to make file larger
         lines.push(logEntry(time.toISOString(), `Entry ${i} ${'x'.repeat(100)}`));
       }
-      return lines.join('\n') + '\n';
+      return `${lines.join('\n')}\n`;
     }
 
     test('finds target date in middle of file', async () => {
@@ -521,9 +517,9 @@ describe('findOffsetForDate', () => {
       const { firstLine } = await findOffsetForDate(file, target, size);
 
       const entry = parseLogLine(firstLine);
-      const entryDate = parseLogDate(entry!.time);
+      const entryDate = parseLogDate(entry?.time);
       expect(compareDates(entryDate!, target)).toBeGreaterThanOrEqual(0);
-      expect(entryDate!.getUTCDate()).toBe(10);
+      expect(entryDate?.getUTCDate()).toBe(10);
     });
 
     test('finds target date near start of file', async () => {
@@ -537,7 +533,7 @@ describe('findOffsetForDate', () => {
       const { firstLine } = await findOffsetForDate(file, target, size);
 
       const entry = parseLogLine(firstLine);
-      const entryDate = parseLogDate(entry!.time);
+      const entryDate = parseLogDate(entry?.time);
       expect(compareDates(entryDate!, target)).toBeGreaterThanOrEqual(0);
     });
 
@@ -552,7 +548,7 @@ describe('findOffsetForDate', () => {
       const { firstLine } = await findOffsetForDate(file, target, size);
 
       const entry = parseLogLine(firstLine);
-      const entryDate = parseLogDate(entry!.time);
+      const entryDate = parseLogDate(entry?.time);
       expect(compareDates(entryDate!, target)).toBeGreaterThanOrEqual(0);
     });
   });
@@ -568,7 +564,7 @@ describe('findOffsetForDate', () => {
         const time = new Date(startDate.getTime() + i * 120000); // 2 min intervals
         lines.push(logEntry(time.toISOString(), `Log entry ${i}: ${'x'.repeat(100)}`));
       }
-      return lines.join('\n') + '\n';
+      return `${lines.join('\n')}\n`;
     }
 
     test('binary search correctly finds date in large file', async () => {
@@ -584,14 +580,14 @@ describe('findOffsetForDate', () => {
       const entry = parseLogLine(firstLine);
       expect(entry).not.toBeNull();
 
-      const entryDate = parseLogDate(entry!.time);
+      const entryDate = parseLogDate(entry?.time);
       expect(entryDate).not.toBeNull();
 
       // Must be >= target
       expect(compareDates(entryDate!, target)).toBeGreaterThanOrEqual(0);
 
       // Should be Dec 8 (not Dec 9 or later)
-      expect(entryDate!.getUTCDate()).toBe(8);
+      expect(entryDate?.getUTCDate()).toBe(8);
     });
 
     test('binary search efficient - limited iterations', async () => {
@@ -628,11 +624,11 @@ describe('findOffsetForDate', () => {
 
   describe('edge cases and boundary conditions', () => {
     test('exact timestamp match', async () => {
-      const content = [
+      const content = `${[
         logEntry('2025-12-14T08:00:00.000Z'),
         logEntry('2025-12-14T09:00:00.000Z'),
         logEntry('2025-12-14T10:00:00.000Z'),
-      ].join('\n') + '\n';
+      ].join('\n')}\n`;
 
       const { file, size } = await createTestFile('exact_match.log', content);
       const target = new Date('2025-12-14T09:00:00.000Z');
@@ -643,10 +639,7 @@ describe('findOffsetForDate', () => {
     });
 
     test('target between two entries', async () => {
-      const content = [
-        logEntry('2025-12-14T08:00:00Z'),
-        logEntry('2025-12-14T10:00:00Z'),
-      ].join('\n') + '\n';
+      const content = `${[logEntry('2025-12-14T08:00:00Z'), logEntry('2025-12-14T10:00:00Z')].join('\n')}\n`;
 
       const { file, size } = await createTestFile('between.log', content);
       // Target is 09:00, between 08:00 and 10:00
@@ -659,11 +652,11 @@ describe('findOffsetForDate', () => {
     });
 
     test('handles entries with same timestamp', async () => {
-      const content = [
+      const content = `${[
         logEntry('2025-12-14T10:00:00Z', 'first'),
         logEntry('2025-12-14T10:00:00Z', 'second'),
         logEntry('2025-12-14T10:00:00Z', 'third'),
-      ].join('\n') + '\n';
+      ].join('\n')}\n`;
 
       const { file, size } = await createTestFile('same_time.log', content);
       const target = new Date('2025-12-14T10:00:00Z');
@@ -675,11 +668,11 @@ describe('findOffsetForDate', () => {
 
     test('handles very long log lines', async () => {
       const longMsg = 'x'.repeat(5000);
-      const content = [
+      const content = `${[
         logEntry('2025-12-13T10:00:00Z', longMsg),
         logEntry('2025-12-14T10:00:00Z', longMsg),
         logEntry('2025-12-15T10:00:00Z', longMsg),
-      ].join('\n') + '\n';
+      ].join('\n')}\n`;
 
       const { file, size } = await createTestFile('long_lines.log', content);
       const target = new Date('2025-12-14T00:00:00Z');
@@ -690,14 +683,14 @@ describe('findOffsetForDate', () => {
     });
 
     test('handles non-JSON lines mixed with JSON', async () => {
-      const content = [
+      const content = `${[
         'Some non-JSON header line',
         logEntry('2025-12-13T10:00:00Z'),
         '--- separator ---',
         logEntry('2025-12-14T10:00:00Z'),
         'Another text line',
         logEntry('2025-12-15T10:00:00Z'),
-      ].join('\n') + '\n';
+      ].join('\n')}\n`;
 
       const { file, size } = await createTestFile('mixed.log', content);
       const target = new Date('2025-12-14T00:00:00Z');
@@ -720,7 +713,7 @@ describe('findOffsetForDate', () => {
           }
         }
       }
-      const content = lines.join('\n') + '\n';
+      const content = `${lines.join('\n')}\n`;
 
       const { file, size } = await createTestFile('weekly.log', content);
 
@@ -729,21 +722,21 @@ describe('findOffsetForDate', () => {
       const { firstLine } = await findOffsetForDate(file, target, size);
 
       const entry = parseLogLine(firstLine);
-      const entryDate = parseLogDate(entry!.time);
+      const entryDate = parseLogDate(entry?.time);
 
-      expect(entryDate!.getUTCDate()).toBe(14);
-      expect(entryDate!.getUTCHours()).toBe(0);
-      expect(entryDate!.getUTCMinutes()).toBe(0);
+      expect(entryDate?.getUTCDate()).toBe(14);
+      expect(entryDate?.getUTCHours()).toBe(0);
+      expect(entryDate?.getUTCMinutes()).toBe(0);
     });
 
     test('handles gaps in log timestamps', async () => {
-      const content = [
+      const content = `${[
         logEntry('2025-12-10T10:00:00Z'),
         logEntry('2025-12-10T11:00:00Z'),
         // Gap: Dec 11-13 missing
         logEntry('2025-12-14T08:00:00Z'),
         logEntry('2025-12-14T09:00:00Z'),
-      ].join('\n') + '\n';
+      ].join('\n')}\n`;
 
       const { file, size } = await createTestFile('gaps.log', content);
 
@@ -762,14 +755,14 @@ describe('findOffsetForDate', () => {
       for (let i = 0; i < 100; i++) {
         lines.push(logEntry(`2025-12-14T10:00:00.${i.toString().padStart(3, '0')}Z`, `Burst ${i}`));
       }
-      const content = lines.join('\n') + '\n';
+      const content = `${lines.join('\n')}\n`;
 
       const { file, size } = await createTestFile('burst.log', content);
       const target = new Date('2025-12-14T10:00:00.050Z');
       const { firstLine } = await findOffsetForDate(file, target, size);
 
       const entry = parseLogLine(firstLine);
-      const entryDate = parseLogDate(entry!.time);
+      const entryDate = parseLogDate(entry?.time);
       expect(compareDates(entryDate!, target)).toBeGreaterThanOrEqual(0);
     });
   });
@@ -800,12 +793,12 @@ describe('findOffsetForDate', () => {
       const entry = parseLogLine(firstLine);
       expect(entry).not.toBeNull();
 
-      const entryDate = parseLogDate(entry!.time);
+      const entryDate = parseLogDate(entry?.time);
       expect(entryDate).not.toBeNull();
 
       // Should find entry on Dec 16
-      expect(entryDate!.getUTCDate()).toBe(16);
-      expect(entryDate!.getUTCMonth()).toBe(11); // December
+      expect(entryDate?.getUTCDate()).toBe(16);
+      expect(entryDate?.getUTCMonth()).toBe(11); // December
 
       // Should be fast (< 100ms for binary search)
       expect(elapsed).toBeLessThan(100);
@@ -821,7 +814,9 @@ describe('findOffsetForDate', () => {
         for (let hour = 0; hour < 24; hour++) {
           const hh = hour.toString().padStart(2, '0');
           const dd = day.toString().padStart(2, '0');
-          lines.push(logEntry(`2025-12-${dd}T${hh}:00:00.000Z`, `Day${dd}_${hh}: ${'x'.repeat(100)}`));
+          lines.push(
+            logEntry(`2025-12-${dd}T${hh}:00:00.000Z`, `Day${dd}_${hh}: ${'x'.repeat(100)}`)
+          );
         }
       }
 
@@ -834,7 +829,9 @@ describe('findOffsetForDate', () => {
       // 400KB of non-JSON lines (simulating stack trace dump or corrupt data)
       for (let i = 0; i < 3000; i++) {
         // ~130 bytes each * 3000 = ~390KB of non-JSON
-        lines.push(`--- Stack trace line ${i.toString().padStart(4, '0')}: ${'ERROR '.repeat(15)} ---`);
+        lines.push(
+          `--- Stack trace line ${i.toString().padStart(4, '0')}: ${'ERROR '.repeat(15)} ---`
+        );
       }
 
       // Dec 16: starts after the non-JSON gap
@@ -843,7 +840,7 @@ describe('findOffsetForDate', () => {
         lines.push(logEntry(`2025-12-16T${hh}:00:00.000Z`, `Day16_${hh}: ${'x'.repeat(100)}`));
       }
 
-      const content = lines.join('\n') + '\n';
+      const content = `${lines.join('\n')}\n`;
       const { file, size } = await createTestFile('regression_nonjson_gap.log', content);
 
       // Target: Dec 15 23:00 UTC
@@ -856,12 +853,12 @@ describe('findOffsetForDate', () => {
       // BUG: If firstLine is empty, we return "found: none"
       expect(entry).not.toBeNull();
 
-      const entryDate = parseLogDate(entry!.time);
+      const entryDate = parseLogDate(entry?.time);
       expect(entryDate).not.toBeNull();
 
       // Must find Dec 16 05:00
       expect(compareDates(entryDate!, target)).toBeGreaterThanOrEqual(0);
-      expect(entryDate!.getUTCDate()).toBe(16);
+      expect(entryDate?.getUTCDate()).toBe(16);
     });
 
     // BUG: Binary search finds position, but gap to first entry >= target is > 256KB linear scan
@@ -880,7 +877,9 @@ describe('findOffsetForDate', () => {
         for (let hour = 0; hour < 24; hour++) {
           const hh = hour.toString().padStart(2, '0');
           const dd = day.toString().padStart(2, '0');
-          lines.push(logEntry(`2025-12-${dd}T${hh}:00:00.000Z`, `Day${dd}_${hh}: ${'x'.repeat(100)}`));
+          lines.push(
+            logEntry(`2025-12-${dd}T${hh}:00:00.000Z`, `Day${dd}_${hh}: ${'x'.repeat(100)}`)
+          );
         }
       }
 
@@ -889,7 +888,12 @@ describe('findOffsetForDate', () => {
       // Binary search will land somewhere in the middle, leaving >256KB to scan
       for (let i = 0; i < 4000; i++) {
         // ~160 bytes each * 4000 = ~640KB all at Dec 15 20:30
-        lines.push(logEntry(`2025-12-15T20:30:00.${i.toString().padStart(4, '0')}Z`, `Dec15_burst_${i.toString().padStart(4, '0')}: ${'y'.repeat(100)}`));
+        lines.push(
+          logEntry(
+            `2025-12-15T20:30:00.${i.toString().padStart(4, '0')}Z`,
+            `Dec15_burst_${i.toString().padStart(4, '0')}: ${'y'.repeat(100)}`
+          )
+        );
       }
 
       // GAP: No entries between Dec 15 20:30.999 and Dec 16 05:00
@@ -900,7 +904,7 @@ describe('findOffsetForDate', () => {
         lines.push(logEntry(`2025-12-16T${hh}:00:00.000Z`, `Day16_${hh}: ${'x'.repeat(100)}`));
       }
 
-      const content = lines.join('\n') + '\n';
+      const content = `${lines.join('\n')}\n`;
       const { file, size } = await createTestFile('regression_large_gap.log', content);
 
       // Target: Dec 15 23:00 UTC
@@ -913,12 +917,12 @@ describe('findOffsetForDate', () => {
       // If this is null or entry is from Dec 15, the bug is reproduced!
       expect(entry).not.toBeNull();
 
-      const entryDate = parseLogDate(entry!.time);
+      const entryDate = parseLogDate(entry?.time);
       expect(entryDate).not.toBeNull();
 
       // CRITICAL: Must find Dec 16 05:00, NOT stay stuck in Dec 15 burst
       expect(compareDates(entryDate!, target)).toBeGreaterThanOrEqual(0);
-      expect(entryDate!.getUTCDate()).toBe(16);
+      expect(entryDate?.getUTCDate()).toBe(16);
     });
 
     // Test: large file (5MB+) with target near end and gap in timestamps
@@ -937,7 +941,12 @@ describe('findOffsetForDate', () => {
           const mm = min.toString().padStart(2, '0');
           const dd = day.toString().padStart(2, '0');
           // ~250 bytes per line
-          lines.push(logEntry(`2025-12-${dd}T${hh}:${mm}:00.000Z`, `Day${dd}_${hh}${mm}_${i}: ${'x'.repeat(170)}`));
+          lines.push(
+            logEntry(
+              `2025-12-${dd}T${hh}:${mm}:00.000Z`,
+              `Day${dd}_${hh}${mm}_${i}: ${'x'.repeat(170)}`
+            )
+          );
         }
       }
 
@@ -948,10 +957,12 @@ describe('findOffsetForDate', () => {
         if (hour >= 24) break;
         const hh = hour.toString().padStart(2, '0');
         const mm = min.toString().padStart(2, '0');
-        lines.push(logEntry(`2025-12-16T${hh}:${mm}:00.000Z`, `Day16_${hh}${mm}_${i}: ${'x'.repeat(170)}`));
+        lines.push(
+          logEntry(`2025-12-16T${hh}:${mm}:00.000Z`, `Day16_${hh}${mm}_${i}: ${'x'.repeat(170)}`)
+        );
       }
 
-      const content = lines.join('\n') + '\n';
+      const content = `${lines.join('\n')}\n`;
       const { file, size } = await createTestFile('regression_large_gap.log', content);
 
       // Verify file is large enough for real binary search
@@ -969,13 +980,13 @@ describe('findOffsetForDate', () => {
       const entry = parseLogLine(firstLine);
       expect(entry).not.toBeNull();
 
-      const entryDate = parseLogDate(entry!.time);
+      const entryDate = parseLogDate(entry?.time);
       expect(entryDate).not.toBeNull();
 
       // CRITICAL: Must find Dec 16 05:00 (first entry >= target)
       expect(compareDates(entryDate!, target)).toBeGreaterThanOrEqual(0);
-      expect(entryDate!.getUTCDate()).toBe(16);
-      expect(entryDate!.getUTCHours()).toBe(5);
+      expect(entryDate?.getUTCDate()).toBe(16);
+      expect(entryDate?.getUTCHours()).toBe(5);
     });
 
     // Test: binary search lands too far from target, 256KB linear scan not enough
@@ -1008,7 +1019,7 @@ describe('findOffsetForDate', () => {
         }
       }
 
-      const content = lines.join('\n') + '\n';
+      const content = `${lines.join('\n')}\n`;
       const { file, size } = await createTestFile('regression_dense.log', content);
 
       // Target: Dec 16 00:00 (but first log is Dec 16 05:00)
@@ -1019,12 +1030,12 @@ describe('findOffsetForDate', () => {
       const entry = parseLogLine(firstLine);
       expect(entry).not.toBeNull();
 
-      const entryDate = parseLogDate(entry!.time);
+      const entryDate = parseLogDate(entry?.time);
       expect(entryDate).not.toBeNull();
 
       // Must find Dec 16 entry, not stay stuck in Dec 15
       expect(compareDates(entryDate!, target)).toBeGreaterThanOrEqual(0);
-      expect(entryDate!.getUTCDate()).toBe(16);
+      expect(entryDate?.getUTCDate()).toBe(16);
     });
 
     // BUG: Very long lines (base64 images) cause "no newline in 64KB" and wrong offset
@@ -1057,7 +1068,7 @@ describe('findOffsetForDate', () => {
         }
       }
 
-      const content = lines.join('\n') + '\n';
+      const content = `${lines.join('\n')}\n`;
       const { file, size } = await createTestFile('regression_huge_lines.log', content);
 
       // File should be > 2MB due to huge base64 lines
@@ -1069,14 +1080,14 @@ describe('findOffsetForDate', () => {
       const result1 = await findOffsetForDate(file, target1, size);
       const entry1 = parseLogLine(result1.firstLine);
       expect(entry1).not.toBeNull();
-      expect(parseLogDate(entry1!.time)!.getUTCDate()).toBe(13);
+      expect(parseLogDate(entry1.time)?.getUTCDate()).toBe(13);
 
       // Target: Dec 14 12:00 - IN the huge lines zone
       const target2 = new Date('2025-12-14T12:00:00.000Z');
       const result2 = await findOffsetForDate(file, target2, size);
       const entry2 = parseLogLine(result2.firstLine);
       expect(entry2).not.toBeNull();
-      const date2 = parseLogDate(entry2!.time)!;
+      const date2 = parseLogDate(entry2.time)!;
       expect(compareDates(date2, target2)).toBeGreaterThanOrEqual(0);
       expect(date2.getUTCDate()).toBe(14);
 
@@ -1085,7 +1096,7 @@ describe('findOffsetForDate', () => {
       const result3 = await findOffsetForDate(file, target3, size);
       const entry3 = parseLogLine(result3.firstLine);
       expect(entry3).not.toBeNull();
-      expect(parseLogDate(entry3!.time)!.getUTCDate()).toBe(15);
+      expect(parseLogDate(entry3.time)?.getUTCDate()).toBe(15);
     });
 
     // BUG: Binary search skips forward when no newline found, missing entries
@@ -1112,7 +1123,7 @@ describe('findOffsetForDate', () => {
         }
       }
 
-      const content = lines.join('\n') + '\n';
+      const content = `${lines.join('\n')}\n`;
       const { file, size } = await createTestFile('regression_mixed_sizes.log', content);
 
       // Search for various dates - all should work correctly
@@ -1129,7 +1140,7 @@ describe('findOffsetForDate', () => {
         const entry = parseLogLine(firstLine);
         expect(entry).not.toBeNull();
 
-        const entryDate = parseLogDate(entry!.time);
+        const entryDate = parseLogDate(entry?.time);
         expect(entryDate).not.toBeNull();
         expect(compareDates(entryDate!, target)).toBeGreaterThanOrEqual(0);
       }
@@ -1150,7 +1161,7 @@ describe('findOffsetForDate', () => {
 
         lines.push(logEntry(date.toISOString(), `Entry ${i}: ${'x'.repeat(80)}`));
       }
-      const content = lines.join('\n') + '\n';
+      const content = `${lines.join('\n')}\n`;
 
       const { file, size } = await createTestFile('regression_first_half.log', content);
       expect(size).toBeGreaterThan(65536);
@@ -1160,10 +1171,10 @@ describe('findOffsetForDate', () => {
       const { firstLine } = await findOffsetForDate(file, target, size);
 
       const entry = parseLogLine(firstLine);
-      const entryDate = parseLogDate(entry!.time);
+      const entryDate = parseLogDate(entry?.time);
 
       // CRITICAL: Must find Dec 8, not a later date
-      expect(entryDate!.getUTCDate()).toBe(8);
+      expect(entryDate?.getUTCDate()).toBe(8);
       expect(compareDates(entryDate!, target)).toBeGreaterThanOrEqual(0);
     });
 
@@ -1175,7 +1186,7 @@ describe('findOffsetForDate', () => {
         time.setUTCMinutes(i % 60);
         lines.push(logEntry(time.toISOString(), `Entry ${i}`));
       }
-      const content = lines.join('\n') + '\n';
+      const content = `${lines.join('\n')}\n`;
 
       const { file, size } = await createTestFile('regression_offset.log', content);
 
@@ -1186,13 +1197,13 @@ describe('findOffsetForDate', () => {
       const readContent = await file.slice(offset, offset + 500).text();
       const firstLine = readContent.split('\n')[0];
       const entry = parseLogLine(firstLine);
-      const entryDate = parseLogDate(entry!.time);
+      const entryDate = parseLogDate(entry?.time);
 
       // Entry at offset should be >= target
       expect(compareDates(entryDate!, target)).toBeGreaterThanOrEqual(0);
 
       // And should be close to target (within ~1 hour)
-      const diffMs = entryDate!.getTime() - target.getTime();
+      const diffMs = entryDate?.getTime() - target.getTime();
       expect(diffMs).toBeLessThan(3600000); // Less than 1 hour difference
     });
   });

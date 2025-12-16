@@ -1,7 +1,7 @@
-import { serve } from 'bun';
 import { readdir } from 'node:fs/promises';
+import { serve } from 'bun';
 import { checkAuth } from './lib/auth';
-import { formatLogForText, readLogs, streamLogs, tailLogs, type LogFilter } from './lib/logs';
+import { formatLogForText, type LogFilter, readLogs, streamLogs, tailLogs } from './lib/logs';
 import { createAppStream, renderLoginPage } from './lib/ssr';
 
 function parseFilter(url: URL): LogFilter {
@@ -19,7 +19,9 @@ function parseFilter(url: URL): LogFilter {
   if (limit) filter.limit = parseInt(limit, 10);
   if (offset) filter.offset = parseInt(offset, 10);
 
-  console.log(`[parseFilter] from=${from} -> ${filter.from?.toISOString()}, to=${to} -> ${filter.to?.toISOString()}`);
+  console.log(
+    `[parseFilter] from=${from} -> ${filter.from?.toISOString()}, to=${to} -> ${filter.to?.toISOString()}`
+  );
 
   return filter;
 }
@@ -33,8 +35,8 @@ async function findAssets(): Promise<{ cssPath: string; jsPath: string }> {
   const cssFile = files.find((f) => f.endsWith('.css')) || 'styles.css';
   const jsFile = files.find((f) => f.endsWith('.js') && !f.endsWith('.map')) || 'main.js';
   return {
-    cssPath: '/' + cssFile,
-    jsPath: '/' + jsFile,
+    cssPath: `/${cssFile}`,
+    jsPath: `/${jsFile}`,
   };
 }
 
@@ -86,7 +88,9 @@ const server = serve({
           limit: filter.limit,
         });
         const t4 = performance.now();
-        console.log(`[HTML] createAppStream + shell sent: ${(t4 - t3).toFixed(1)}ms, total before response: ${(t4 - t0).toFixed(1)}ms`);
+        console.log(
+          `[HTML] createAppStream + shell sent: ${(t4 - t3).toFixed(1)}ms, total before response: ${(t4 - t0).toFixed(1)}ms`
+        );
 
         // Stream logs in background (shell already sent, browser can start rendering)
         (async () => {
@@ -95,13 +99,17 @@ const server = serve({
             const tLogs = performance.now();
             await streamLogs(filter, (entry) => {
               if (count === 0) {
-                console.log(`[HTML] first log entry: ${(performance.now() - tLogs).toFixed(1)}ms after streamLogs start`);
+                console.log(
+                  `[HTML] first log entry: ${(performance.now() - tLogs).toFixed(1)}ms after streamLogs start`
+                );
               }
               sendLogEntry(entry);
               count++;
             });
 
-            console.log(`[HTML] streamLogs complete: ${count} entries in ${(performance.now() - tLogs).toFixed(1)}ms`);
+            console.log(
+              `[HTML] streamLogs complete: ${count} entries in ${(performance.now() - tLogs).toFixed(1)}ms`
+            );
             sendEnd(count);
           } catch (err) {
             console.error('Error streaming logs:', err);
@@ -143,7 +151,9 @@ const server = serve({
               if (cancelled) return;
 
               // Send marker that historical logs are done
-              controller.enqueue(encoder.encode(`event: historical-end\ndata: ${historicalCount}\n\n`));
+              controller.enqueue(
+                encoder.encode(`event: historical-end\ndata: ${historicalCount}\n\n`)
+              );
 
               // Real-time updates only if no limit (showing all) or viewing latest data
               // With pagination, real-time doesn't make sense for older pages

@@ -1,4 +1,4 @@
-import { parseISO, isAfter, isBefore, isEqual } from 'date-fns';
+import { isAfter, isBefore, parseISO } from 'date-fns';
 
 export interface LogEntry {
   level: string;
@@ -14,10 +14,10 @@ export function parseLogDate(timeStr: string): Date | null {
   try {
     // Try ISO format first (most common)
     const parsed = parseISO(timeStr);
-    if (!isNaN(parsed.getTime())) return parsed;
+    if (!Number.isNaN(parsed.getTime())) return parsed;
     // Fallback to native Date
     const native = new Date(timeStr);
-    if (!isNaN(native.getTime())) return native;
+    if (!Number.isNaN(native.getTime())) return native;
     return null;
   } catch {
     return null;
@@ -66,7 +66,11 @@ function isCacheValidForDate(cache: OffsetCache, fromDate: Date): boolean {
 }
 
 // Binary search to find byte offset where entries >= targetDate start
-export async function findOffsetForDate(file: ReturnType<typeof Bun.file>, targetDate: Date, fileSize: number): Promise<{ offset: number; firstLine: string }> {
+export async function findOffsetForDate(
+  file: ReturnType<typeof Bun.file>,
+  targetDate: Date,
+  fileSize: number
+): Promise<{ offset: number; firstLine: string }> {
   const t0 = performance.now();
 
   let low = 0;
@@ -94,7 +98,10 @@ export async function findOffsetForDate(file: ReturnType<typeof Bun.file>, targe
           // Found newline in larger chunk - continue with this data
           const restOfLargerChunk = largerChunk.slice(largerNewlinePos + 1);
           const nextNewlineInLarger = restOfLargerChunk.indexOf('\n');
-          const lineFromLarger = nextNewlineInLarger === -1 ? restOfLargerChunk : restOfLargerChunk.slice(0, nextNewlineInLarger);
+          const lineFromLarger =
+            nextNewlineInLarger === -1
+              ? restOfLargerChunk
+              : restOfLargerChunk.slice(0, nextNewlineInLarger);
 
           if (lineFromLarger.trim()) {
             const entryFromLarger = parseLogLineStrict(lineFromLarger);
@@ -104,10 +111,14 @@ export async function findOffsetForDate(file: ReturnType<typeof Bun.file>, targe
                 const cmpLarger = compareDates(dateFromLarger, targetDate);
                 if (cmpLarger < 0) {
                   const newLow = mid + largerNewlinePos + 1 + lineFromLarger.length + 1;
-                  console.log(`[bs#${iterations}] mid=${mid}, found in 64KB: ${entryFromLarger.time} < target, low=${newLow}`);
+                  console.log(
+                    `[bs#${iterations}] mid=${mid}, found in 64KB: ${entryFromLarger.time} < target, low=${newLow}`
+                  );
                   low = newLow;
                 } else {
-                  console.log(`[bs#${iterations}] mid=${mid}, found in 64KB: ${entryFromLarger.time} >= target, high=${mid}`);
+                  console.log(
+                    `[bs#${iterations}] mid=${mid}, found in 64KB: ${entryFromLarger.time} >= target, high=${mid}`
+                  );
                   high = mid;
                 }
                 continue;
@@ -153,10 +164,14 @@ export async function findOffsetForDate(file: ReturnType<typeof Bun.file>, targe
           if (searchDate) {
             const searchCmp = compareDates(searchDate, targetDate);
             if (searchCmp < 0) {
-              console.log(`[bs#${iterations}] mid=${mid}, found JSON after non-JSON: ${searchEntry.time} < target, low=${searchOffset}`);
+              console.log(
+                `[bs#${iterations}] mid=${mid}, found JSON after non-JSON: ${searchEntry.time} < target, low=${searchOffset}`
+              );
               low = searchOffset;
             } else {
-              console.log(`[bs#${iterations}] mid=${mid}, found JSON after non-JSON: ${searchEntry.time} >= target, high=${mid}`);
+              console.log(
+                `[bs#${iterations}] mid=${mid}, found JSON after non-JSON: ${searchEntry.time} >= target, high=${mid}`
+              );
               high = mid;
             }
             foundJson = true;
@@ -230,13 +245,19 @@ export async function findOffsetForDate(file: ReturnType<typeof Bun.file>, targe
   }
 
   if (!bestLine) {
-    console.log(`[binarySearch] linear scan: ${scannedCount} lines, foundAnyEntry=${foundAnyEntry}, no match >= target`);
+    console.log(
+      `[binarySearch] linear scan: ${scannedCount} lines, foundAnyEntry=${foundAnyEntry}, no match >= target`
+    );
   }
 
   const foundEntry = parseLogLine(bestLine);
   const foundDate = foundEntry?.time ? parseLogDate(foundEntry.time) : null;
-  console.log(`[binarySearch] low=${low}, bestOffset=${bestOffset}, iterations=${iterations}, ${(performance.now() - t0).toFixed(1)}ms`);
-  console.log(`[binarySearch] target: ${targetDate.toISOString()}, found: ${foundDate?.toISOString() || 'none'}`);
+  console.log(
+    `[binarySearch] low=${low}, bestOffset=${bestOffset}, iterations=${iterations}, ${(performance.now() - t0).toFixed(1)}ms`
+  );
+  console.log(
+    `[binarySearch] target: ${targetDate.toISOString()}, found: ${foundDate?.toISOString() || 'none'}`
+  );
   console.log(`[binarySearch] firstLine preview: ${bestLine.slice(0, 100)}...`);
 
   return { offset: bestOffset, firstLine: bestLine };
@@ -328,53 +349,65 @@ export async function streamLogs(
   const stat = await file.stat();
   const fileSize = stat?.size || 0;
 
-  // Default to today if no date range specified
-  const effectiveFilter: LogFilter = {
-    ...filter,
-    from: filter.from ?? getTodayStart(),
-    to: filter.to ?? getTodayEnd(),
-  };
+  // Only use from/to if specified - no defaults
+  const fromDate = filter.from;
+  const toDate = filter.to;
 
-  const fromDate = effectiveFilter.from!;
-
-  // Try to use cached offset
+  // Try to use cached offset (only if we have a from date)
   let startOffset = 0;
   let cacheHit = false;
 
-  if (offsetCache && offsetCache.fileSize <= fileSize && isCacheValidForDate(offsetCache, fromDate)) {
-    // Validate cache - check if line at offset is still the same
-    const validationChunk = await file.slice(offsetCache.byteOffset, offsetCache.byteOffset + offsetCache.validationLine.length + 100).text();
-    const firstLine = validationChunk.split('\n')[0];
+  if (fromDate) {
+    if (
+      offsetCache &&
+      offsetCache.fileSize <= fileSize &&
+      isCacheValidForDate(offsetCache, fromDate)
+    ) {
+      // Validate cache - check if line at offset is still the same
+      const validationChunk = await file
+        .slice(
+          offsetCache.byteOffset,
+          offsetCache.byteOffset + offsetCache.validationLine.length + 100
+        )
+        .text();
+      const firstLine = validationChunk.split('\n')[0];
 
-    if (firstLine === offsetCache.validationLine) {
-      startOffset = offsetCache.byteOffset;
-      cacheHit = true;
-      console.log(`[streamLogs] cache HIT, offset=${startOffset}, cached=${new Date(offsetCache.fromTimestamp).toISOString()}, requested=${fromDate.toISOString()}`);
-    } else {
-      console.log(`[streamLogs] cache INVALID (line changed), will binary search`);
-      offsetCache = null;
+      if (firstLine === offsetCache.validationLine) {
+        startOffset = offsetCache.byteOffset;
+        cacheHit = true;
+        console.log(
+          `[streamLogs] cache HIT, offset=${startOffset}, cached=${new Date(offsetCache.fromTimestamp).toISOString()}, requested=${fromDate.toISOString()}`
+        );
+      } else {
+        console.log(`[streamLogs] cache INVALID (line changed), will binary search`);
+        offsetCache = null;
+      }
     }
+
+    // Binary search if no cache and file is large
+    if (!cacheHit && fileSize > 1024 * 1024) {
+      const t1 = performance.now();
+      const { offset, firstLine } = await findOffsetForDate(file, fromDate, fileSize);
+      startOffset = offset;
+      console.log(
+        `[streamLogs] binary search: ${(performance.now() - t1).toFixed(1)}ms, offset=${offset}`
+      );
+
+      // Update cache
+      if (firstLine) {
+        offsetCache = {
+          fromTimestamp: fromDate.getTime(),
+          byteOffset: offset,
+          validationLine: firstLine,
+          fileSize,
+        };
+      }
+    }
+  } else {
+    console.log(`[streamLogs] no from date filter, starting from beginning`);
   }
 
-  // Binary search if no cache
-  if (!cacheHit && fileSize > 1024 * 1024) { // Only for files > 1MB
-    const t1 = performance.now();
-    const { offset, firstLine } = await findOffsetForDate(file, fromDate, fileSize);
-    startOffset = offset;
-    console.log(`[streamLogs] binary search: ${(performance.now() - t1).toFixed(1)}ms, offset=${offset}`);
-
-    // Update cache
-    if (firstLine) {
-      offsetCache = {
-        fromTimestamp: fromDate.getTime(),
-        byteOffset: offset,
-        validationLine: firstLine,
-        fileSize,
-      };
-    }
-  }
-
-  const limit = effectiveFilter.limit; // No default - show all if not specified
+  const limit = filter.limit; // No default - show all if not specified
   let count = 0;
   let buffer = '';
   let totalLines = 0;
@@ -389,7 +422,9 @@ export async function streamLogs(
   const decoder = new TextDecoder();
   const t2 = performance.now();
 
-  console.log(`[streamLogs] starting from offset ${startOffset} (${(startOffset/1024/1024).toFixed(1)}MB into ${(fileSize/1024/1024).toFixed(1)}MB file)`);
+  console.log(
+    `[streamLogs] starting from offset ${startOffset} (${(startOffset / 1024 / 1024).toFixed(1)}MB into ${(fileSize / 1024 / 1024).toFixed(1)}MB file)`
+  );
 
   try {
     while (true) {
@@ -400,7 +435,9 @@ export async function streamLogs(
       totalBytes += value?.length || 0;
 
       if (chunkCount === 1) {
-        console.log(`[streamLogs] first chunk: ${(performance.now() - t2).toFixed(1)}ms, ${value?.length} bytes`);
+        console.log(
+          `[streamLogs] first chunk: ${(performance.now() - t2).toFixed(1)}ms, ${value?.length} bytes`
+        );
       }
 
       buffer += decoder.decode(value, { stream: true });
@@ -418,22 +455,28 @@ export async function streamLogs(
           continue;
         }
 
-        if (filterLog(entry, effectiveFilter)) {
+        if (filterLog(entry, filter)) {
           if (count < 5) {
-            console.log(`[streamLogs] match #${count}: time=${entry.time}, msg=${entry.msg?.slice(0, 50)}`);
+            console.log(
+              `[streamLogs] match #${count}: time=${entry.time}, msg=${entry.msg?.slice(0, 50)}`
+            );
           }
           if (count === 0) {
-            console.log(`[streamLogs] first match: ${(performance.now() - t2).toFixed(1)}ms, after ${totalLines} lines`);
+            console.log(
+              `[streamLogs] first match: ${(performance.now() - t2).toFixed(1)}ms, after ${totalLines} lines`
+            );
           }
           onEntry(entry);
           count++;
         } else {
           skippedByFilter++;
           // Early exit if we passed the 'to' date (logs are chronological)
-          if (effectiveFilter.to) {
+          if (toDate) {
             const entryDate = parseLogDate(entry.time);
-            if (entryDate && isAfter(entryDate, effectiveFilter.to)) {
-              console.log(`[streamLogs] passed 'to' date (${entryDate.toISOString()} > ${effectiveFilter.to.toISOString()}), stopping early`);
+            if (entryDate && isAfter(entryDate, toDate)) {
+              console.log(
+                `[streamLogs] passed 'to' date (${entryDate.toISOString()} > ${toDate.toISOString()}), stopping early`
+              );
               break;
             }
           }
@@ -447,7 +490,7 @@ export async function streamLogs(
     if ((limit === undefined || count < limit) && buffer.trim()) {
       totalLines++;
       const entry = parseLogLineStrict(buffer);
-      if (entry && filterLog(entry, effectiveFilter)) {
+      if (entry && filterLog(entry, filter)) {
         onEntry(entry);
       }
     }
@@ -455,10 +498,14 @@ export async function streamLogs(
     reader.releaseLock();
   }
 
-  console.log(`[streamLogs] done: ${(performance.now() - t0).toFixed(1)}ms total, ${chunkCount} chunks, ${(totalBytes/1024/1024).toFixed(1)}MB read, ${totalLines} lines, ${skippedByFilter} skipped, ${count} matched`);
+  console.log(
+    `[streamLogs] done: ${(performance.now() - t0).toFixed(1)}ms total, ${chunkCount} chunks, ${(totalBytes / 1024 / 1024).toFixed(1)}MB read, ${totalLines} lines, ${skippedByFilter} skipped, ${count} matched`
+  );
 }
 
-export async function readLogs(filter: LogFilter = {}): Promise<{ logs: LogEntry[]; hasMore: boolean; total: number }> {
+export async function readLogs(
+  filter: LogFilter = {}
+): Promise<{ logs: LogEntry[]; hasMore: boolean; total: number }> {
   if (!LOG_FILE_PATH) {
     throw new Error('LOG_FILE_PATH not configured');
   }
@@ -515,7 +562,10 @@ export async function readLogs(filter: LogFilter = {}): Promise<{ logs: LogEntry
   }
 
   const total = matchedEntries.length;
-  const logs = limit !== undefined ? matchedEntries.slice(offset, offset + limit) : matchedEntries.slice(offset);
+  const logs =
+    limit !== undefined
+      ? matchedEntries.slice(offset, offset + limit)
+      : matchedEntries.slice(offset);
 
   return {
     logs,

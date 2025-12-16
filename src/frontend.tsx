@@ -3,10 +3,10 @@
  * Supports SSR hydration by parsing data-log-item attributes from DOM.
  */
 
-import { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
-import { App, type AppProps } from "./App";
-import type { LogEntry } from "./hooks/useLogs";
+import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
+import { App, type AppProps } from './App';
+import type { LogEntry } from './hooks/useLogs';
 
 declare global {
   interface Window {
@@ -17,11 +17,11 @@ declare global {
 
 // Parse logs from SSR-rendered DOM elements
 function parseLogsFromDOM(): LogEntry[] {
-  const elements = document.querySelectorAll("[data-log-item]");
+  const elements = document.querySelectorAll('[data-log-item]');
   const logs: LogEntry[] = [];
 
   elements.forEach((el) => {
-    const json = el.getAttribute("data-log-item");
+    const json = el.getAttribute('data-log-item');
     if (json) {
       try {
         logs.push(JSON.parse(json));
@@ -34,7 +34,7 @@ function parseLogsFromDOM(): LogEntry[] {
   return logs;
 }
 
-const elem = document.getElementById("root")!;
+const elem = document.getElementById('root')!;
 const hasSSRContent = elem.hasChildNodes();
 
 // Extract SSR data

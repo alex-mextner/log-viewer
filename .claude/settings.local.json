@@ -14,7 +14,12 @@
       "Bash(bun test:*)",
       "Bash(cat:*)",
       "Bash(npx tsc:*)",
-      "Bash(bun run build:client:*)"
+      "Bash(bun run build:client:*)",
+      "Bash(bun add:*)",
+      "Bash(bunx husky:*)",
+      "Bash(bun run lint:*)",
+      "Bash(bunx biome:*)",
+      "Bash(bun run lint:fix:*)"
     ]
   }
 }

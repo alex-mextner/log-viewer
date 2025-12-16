@@ -33,7 +33,11 @@ function formatTime(time: string): string {
 
 // Escape HTML special chars
 function escapeHtml(str: string): string {
-  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 // Pure HTML string for a log row (for streaming)
@@ -100,7 +104,7 @@ function SSRLevelFilter() {
 const LIMIT_OPTIONS = [100, 500, 1000, 5000];
 
 // SSR pagination - suppressHydrationWarning because client uses Button component with different attrs
-function SSRPagination({ total }: { total: number }) {
+function _SSRPagination({ total }: { total: number }) {
   return (
     <div className="flex items-center gap-2 text-sm flex-wrap" suppressHydrationWarning>
       <span className="text-muted-foreground">{total} entries</span>
@@ -223,7 +227,11 @@ export function createAppStream({ password, cssPath, jsPath }: SSROptions): {
     logCount++;
     if (logCount === 1) {
       // Hide loading indicator, show timing
-      controller.enqueue(encoder.encode(`<script>document.getElementById('ssr-loading')?.remove()</script><!-- [SSR] first log: ${(performance.now() - t0).toFixed(1)}ms -->`));
+      controller.enqueue(
+        encoder.encode(
+          `<script>document.getElementById('ssr-loading')?.remove()</script><!-- [SSR] first log: ${(performance.now() - t0).toFixed(1)}ms -->`
+        )
+      );
     }
     controller.enqueue(encoder.encode(logRowToHtml(entry)));
   };

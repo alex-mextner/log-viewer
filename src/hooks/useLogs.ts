@@ -61,7 +61,7 @@ export function useLogs({ password, filter, initialLogs }: UseLogsOptions): UseL
   const hasInitialLogs = useRef(initialLogs && initialLogs.length > 0);
   const skipNextEffect = useRef(hasInitialLogs.current);
 
-  // Stable filter key for effect dependency
+  // Stable filter key for effect dependency (biome-ignore: used in useEffect)
   const filterKey = useMemo(
     () =>
       JSON.stringify({
@@ -148,7 +148,7 @@ export function useLogs({ password, filter, initialLogs }: UseLogsOptions): UseL
       eventSourceRef.current = null;
       setStreaming(false);
     };
-  }, [password, filterKey]);
+  }, [password, filterKey, filter]);
 
   const refresh = useCallback(() => {
     skipNextEffect.current = false; // Allow effect to run

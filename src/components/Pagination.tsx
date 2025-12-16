@@ -11,7 +11,14 @@ interface PaginationProps {
 
 const LIMIT_OPTIONS = [100, 500, 1000, 5000];
 
-export function Pagination({ total, limit, page = 1, loading, onLimitChange, onPageChange }: PaginationProps) {
+export function Pagination({
+  total,
+  limit,
+  page = 1,
+  loading,
+  onLimitChange,
+  onPageChange,
+}: PaginationProps) {
   const hasLimit = limit !== undefined;
   const totalPages = hasLimit ? Math.ceil(total / limit) : 1;
   const currentPage = hasLimit ? Math.min(page, totalPages) || 1 : 1;
@@ -22,7 +29,11 @@ export function Pagination({ total, limit, page = 1, loading, onLimitChange, onP
     <div className="flex items-center gap-2 text-sm flex-wrap">
       {/* Entry count and range */}
       <span className="text-muted-foreground">
-        {total > 0 ? (hasLimit ? `${startEntry}-${endEntry} of ${total}` : `${total} entries`) : '0 entries'}
+        {total > 0
+          ? hasLimit
+            ? `${startEntry}-${endEntry} of ${total}`
+            : `${total} entries`
+          : '0 entries'}
       </span>
 
       {/* Page navigation - only when limit is set and multiple pages */}
@@ -80,9 +91,7 @@ export function Pagination({ total, limit, page = 1, loading, onLimitChange, onP
       </Button>
 
       {/* Loading indicator */}
-      {loading && (
-        <span className="text-muted-foreground animate-pulse ml-2">Loading...</span>
-      )}
+      {loading && <span className="text-muted-foreground animate-pulse ml-2">Loading...</span>}
     </div>
   );
 }

@@ -43,7 +43,10 @@ function LogRow({ entry, onClick }: { entry: LogEntry; onClick: () => void }) {
 
 function LogDetail({ entry, onClose }: { entry: LogEntry; onClose: () => void }) {
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
+    <div
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+      onClick={onClose}
+    >
       <div
         className="bg-card border rounded-lg max-w-2xl w-full max-h-[80vh] overflow-auto m-4"
         onClick={(e) => e.stopPropagation()}
@@ -54,13 +57,21 @@ function LogDetail({ entry, onClose }: { entry: LogEntry; onClose: () => void })
             ✕
           </button>
         </div>
-        <pre className="p-4 text-sm font-mono overflow-x-auto">{JSON.stringify(entry, null, 2)}</pre>
+        <pre className="p-4 text-sm font-mono overflow-x-auto">
+          {JSON.stringify(entry, null, 2)}
+        </pre>
       </div>
     </div>
   );
 }
 
-export function LogViewer({ logs, loading, streaming, hasData, showAutoScroll = false }: LogViewerProps) {
+export function LogViewer({
+  logs,
+  loading,
+  streaming,
+  hasData,
+  showAutoScroll = false,
+}: LogViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const [selectedEntry, setSelectedEntry] = useState<LogEntry | null>(null);
@@ -70,7 +81,7 @@ export function LogViewer({ logs, loading, streaming, hasData, showAutoScroll = 
     if (showAutoScroll && autoScroll && containerRef.current) {
       containerRef.current.scrollTop = containerRef.current.scrollHeight;
     }
-  }, [logs, autoScroll, showAutoScroll]);
+  }, [autoScroll, showAutoScroll]);
 
   // Detect manual scroll
   const handleScroll = () => {
@@ -99,7 +110,11 @@ export function LogViewer({ logs, loading, streaming, hasData, showAutoScroll = 
           <div className="p-4 text-center text-muted-foreground">No logs found</div>
         ) : (
           logs.map((entry, i) => (
-            <LogRow key={`${entry.time}-${i}`} entry={entry} onClick={() => setSelectedEntry(entry)} />
+            <LogRow
+              key={`${entry.time}-${i}`}
+              entry={entry}
+              onClick={() => setSelectedEntry(entry)}
+            />
           ))
         )}
       </div>
