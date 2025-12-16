@@ -1,12 +1,7 @@
-import { Suspense } from 'react';
-import { renderToReadableStream } from 'react-dom/server';
+import { renderToString } from 'react-dom/server';
 import type { LogEntry } from './logs';
 
 // Lightweight SSR components - no hooks, no client-side code
-
-interface LogRowProps {
-  entry: LogEntry;
-}
 
 const LEVEL_COLORS: Record<string, string> = {
   debug: 'text-gray-400',
@@ -23,6 +18,29 @@ const LEVEL_BG_COLORS: Record<string, string> = {
 };
 
 const LEVELS = ['debug', 'info', 'warn', 'error'] as const;
+
+// Magic marker for splitting HTML
+const LOGS_PLACEHOLDER = '<!--__LOGS_STREAM__-->';
+
+function formatTime(time: string): string {
+  try {
+    const date = new Date(time);
+    return date.toLocaleTimeString('en-US', { hour12: false });
+  } catch {
+    return time;
+  }
+}
+
+// Pure HTML string for a log row (for streaming)
+function logRowToHtml(entry: LogEntry): string {
+  const levelColor = LEVEL_COLORS[entry.level] || 'text-gray-400';
+  const time = formatTime(entry.time);
+  const module = entry.module || '-';
+  // Escape HTML
+  const msg = (entry.msg || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  return `<div class="flex gap-2 px-2 py-0.5 hover:bg-accent cursor-pointer text-sm font-mono"><span class="text-muted-foreground shrink-0">${time}</span><span class="shrink-0 w-12 uppercase ${levelColor}">${entry.level}</span><span class="text-muted-foreground shrink-0 w-24 truncate">${module}</span><span class="truncate">${msg}</span></div>`;
+}
 
 // SSR-only filter components (no handlers, just UI shell)
 function SSRDateFilter() {
@@ -73,52 +91,12 @@ function SSRLevelFilter() {
   );
 }
 
-function formatTime(time: string): string {
-  try {
-    const date = new Date(time);
-    return date.toLocaleTimeString('en-US', { hour12: false });
-  } catch {
-    return time;
-  }
-}
-
-function LogRow({ entry }: LogRowProps) {
-  const levelColor = LEVEL_COLORS[entry.level] || 'text-gray-400';
-  return (
-    <div className="flex gap-2 px-2 py-0.5 hover:bg-accent cursor-pointer text-sm font-mono">
-      <span className="text-muted-foreground shrink-0">{formatTime(entry.time)}</span>
-      <span className={`shrink-0 w-12 uppercase ${levelColor}`}>{entry.level}</span>
-      <span className="text-muted-foreground shrink-0 w-24 truncate">{entry.module || '-'}</span>
-      <span className="truncate">{entry.msg}</span>
-    </div>
-  );
-}
-
-function LogsList({ logs }: { logs: LogEntry[] }) {
-  if (logs.length === 0) {
-    return <div className="p-4 text-center text-muted-foreground">No logs found</div>;
-  }
-
-  return (
-    <>
-      {logs.map((entry, i) => (
-        <LogRow key={`${entry.time}-${i}`} entry={entry} />
-      ))}
-    </>
-  );
-}
-
-function LogsLoading() {
-  return <div className="p-4 text-center text-muted-foreground">Loading logs...</div>;
-}
-
 interface SSRAppProps {
-  logs: LogEntry[];
-  password: string;
   logsCount: number;
 }
 
-function SSRApp({ logs, logsCount }: SSRAppProps) {
+// Shell with placeholder where logs will be streamed
+function SSRApp({ logsCount }: SSRAppProps) {
   return (
     <div className="min-h-screen flex flex-col bg-background p-4">
       {/* Header */}
@@ -141,12 +119,12 @@ function SSRApp({ logs, logsCount }: SSRAppProps) {
         </div>
       </div>
 
-      {/* Log viewer with Suspense for streaming */}
-      <div className="flex-1 overflow-auto bg-background border rounded">
-        <Suspense fallback={<LogsLoading />}>
-          <LogsList logs={logs} />
-        </Suspense>
-      </div>
+      {/* Log viewer - placeholder will be replaced with streamed content */}
+      <div
+        className="flex-1 overflow-auto bg-background border rounded"
+        suppressHydrationWarning
+        dangerouslySetInnerHTML={{ __html: LOGS_PLACEHOLDER }}
+      />
 
       {/* Status bar */}
       <div className="flex items-center justify-between text-xs text-muted-foreground px-2 py-1">
@@ -170,56 +148,46 @@ export async function renderAppToStream({ logs, password, cssPath, jsPath }: SSR
     initialPassword: password,
   };
 
-  const stream = await renderToReadableStream(
-    <html lang="en">
-      <head>
-        <meta charSet="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <link rel="icon" type="image/svg+xml" href="/logo.svg" />
-        <title>Log Viewer</title>
-        <link rel="stylesheet" href={cssPath} />
-      </head>
-      <body>
-        <div id="root">
-          <SSRApp logs={logs} password={password} logsCount={logs.length} />
-        </div>
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `window.__INITIAL_DATA__=${JSON.stringify(initialData)};`,
-          }}
-        />
-        <script type="module" src={jsPath} async />
-      </body>
-    </html>,
-    {
-      onError(error) {
-        console.error('SSR Error:', error);
-      },
-    }
-  );
+  // Render shell with placeholder
+  const shellHtml = renderToString(<SSRApp logsCount={logs.length} />);
 
-  return stream;
+  // Split by placeholder
+  const [beforeLogs, afterLogs] = shellHtml.split(LOGS_PLACEHOLDER);
+
+  // Build document parts
+  const docStart = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><link rel="icon" type="image/svg+xml" href="/logo.svg"/><title>Log Viewer</title><link rel="stylesheet" href="${cssPath}"/></head><body><div id="root">`;
+
+  const docEnd = `</div><script>window.__INITIAL_DATA__=${JSON.stringify(initialData)};</script><script type="module" src="${jsPath}" async></script></body></html>`;
+
+  const encoder = new TextEncoder();
+
+  return new ReadableStream({
+    async start(controller) {
+      // 1. Send document start + shell before logs
+      controller.enqueue(encoder.encode(docStart + beforeLogs));
+
+      // 2. Stream logs one by one
+      for (const entry of logs) {
+        controller.enqueue(encoder.encode(logRowToHtml(entry)));
+      }
+
+      // 3. Send shell after logs + document end
+      controller.enqueue(encoder.encode(afterLogs + docEnd));
+
+      controller.close();
+    },
+  });
 }
 
 // Login page - no logs, just the form shell
 export async function renderLoginPage(cssPath: string, jsPath: string): Promise<ReadableStream> {
-  const stream = await renderToReadableStream(
-    <html lang="en">
-      <head>
-        <meta charSet="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <link rel="icon" type="image/svg+xml" href="/logo.svg" />
-        <title>Log Viewer</title>
-        <link rel="stylesheet" href={cssPath} />
-      </head>
-      <body>
-        <div id="root">
-          {/* React will render login form */}
-        </div>
-        <script type="module" src={jsPath} async />
-      </body>
-    </html>
-  );
+  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><link rel="icon" type="image/svg+xml" href="/logo.svg"/><title>Log Viewer</title><link rel="stylesheet" href="${cssPath}"/></head><body><div id="root"></div><script type="module" src="${jsPath}" async></script></body></html>`;
 
-  return stream;
+  const encoder = new TextEncoder();
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(html));
+      controller.close();
+    },
+  });
 }
