@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 export interface LogEntry {
   level: string;
@@ -29,6 +29,7 @@ interface UseLogsResult {
   error: string | null;
   refresh: () => void;
   streaming: boolean;
+  hasData: boolean; // true as soon as first log arrives (for opacity)
 }
 
 function buildUrl(endpoint: string, password: string, filter: LogFilter): string {
@@ -50,85 +51,151 @@ function buildUrl(endpoint: string, password: string, filter: LogFilter): string
   return `${endpoint}?${params.toString()}`;
 }
 
-export function useLogs({ password, filter, autoRefresh = true, initialLogs }: UseLogsOptions): UseLogsResult {
+export function useLogs({ password, filter, initialLogs }: UseLogsOptions): UseLogsResult {
   const [logs, setLogs] = useState<LogEntry[]>(initialLogs || []);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [streaming, setStreaming] = useState(false);
+  const [hasData, setHasData] = useState(Boolean(initialLogs?.length));
   const eventSourceRef = useRef<EventSource | null>(null);
-  const hasInitialLogs = useRef((initialLogs?.length || 0) > 0);
+  const hasInitialLogs = useRef(initialLogs && initialLogs.length > 0);
+  const skipNextEffect = useRef(hasInitialLogs.current);
+
+  // Stable filter key for effect dependency
+  const filterKey = useMemo(
+    () =>
+      JSON.stringify({
+        from: filter.from,
+        to: filter.to,
+        level: filter.level,
+        limit: filter.limit,
+        page: filter.page,
+      }),
+    [filter.from, filter.to, filter.level, filter.limit, filter.page]
+  );
 
   // Connect to SSE stream - it sends historical logs first, then real-time updates
-  const connectStream = useCallback(() => {
+  useEffect(() => {
     if (!password) return;
 
-    // Skip if we have SSR logs on first load
-    if (hasInitialLogs.current) {
-      hasInitialLogs.current = false;
-      // Still connect for real-time updates but don't show loading
-      if (!autoRefresh) return;
+    // Skip first effect if we have SSR logs (avoid double load)
+    if (skipNextEffect.current) {
+      skipNextEffect.current = false;
+      return;
     }
 
     // Close existing connection
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
+      eventSourceRef.current = null;
     }
 
     setLoading(true);
     setError(null);
-    setLogs([]); // Clear logs, they'll stream in
+    setLogs([]);
+    setHasData(false);
+
+    // Capture limit for closure (filter.limit may change)
+    const hasLimit = filter.limit !== undefined;
 
     const url = buildUrl('/api/logs/stream', password, filter);
     const eventSource = new EventSource(url);
     eventSourceRef.current = eventSource;
+    let historicalDone = false;
+    let intentionallyClosed = false;
+    let firstLogReceived = false;
 
     eventSource.onopen = () => {
       setStreaming(true);
     };
 
-    // Regular log entries
     eventSource.onmessage = (event) => {
       try {
         const entry = JSON.parse(event.data) as LogEntry;
+        if (!firstLogReceived) {
+          firstLogReceived = true;
+          setHasData(true);
+        }
         setLogs((prev) => [...prev, entry]);
       } catch {
         // Ignore parse errors
       }
     };
 
-    // Historical logs finished loading
     eventSource.addEventListener('historical-end', () => {
+      historicalDone = true;
       setLoading(false);
+      // If we have a limit, server will close connection - that's expected
+      if (hasLimit) {
+        intentionallyClosed = true;
+      }
     });
 
-    eventSource.onerror = (e) => {
+    eventSource.onerror = () => {
       setStreaming(false);
-      setLoading(false);
-      // Don't show error if connection was closed normally (e.g., pagination mode)
-      if (eventSource.readyState !== EventSource.CLOSED) {
+      // Only show error if it's unexpected (not server-initiated close after pagination)
+      if (!historicalDone && !intentionallyClosed) {
+        setLoading(false);
         setError('Connection lost');
       }
       eventSource.close();
+      eventSourceRef.current = null;
     };
-  }, [password, filter, autoRefresh]);
-
-  // Connect on mount and when filter changes
-  useEffect(() => {
-    connectStream();
 
     return () => {
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-        setStreaming(false);
-      }
+      intentionallyClosed = true;
+      eventSource.close();
+      eventSourceRef.current = null;
+      setStreaming(false);
     };
-  }, [connectStream]);
+  }, [password, filterKey]);
 
-  return {
-    logs,
-    loading,
-    error,
-    refresh: connectStream,
-    streaming,
-  };
+  const refresh = useCallback(() => {
+    skipNextEffect.current = false; // Allow effect to run
+    // Close existing and let effect handle reconnection
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+    setLoading(true);
+    setError(null);
+    setLogs([]);
+    setHasData(false);
+
+    const url = buildUrl('/api/logs/stream', password, filter);
+    const eventSource = new EventSource(url);
+    eventSourceRef.current = eventSource;
+    let historicalDone = false;
+    let intentionallyClosed = false;
+    let firstLogReceived = false;
+
+    eventSource.onopen = () => setStreaming(true);
+    eventSource.onmessage = (event) => {
+      try {
+        if (!firstLogReceived) {
+          firstLogReceived = true;
+          setHasData(true);
+        }
+        setLogs((prev) => [...prev, JSON.parse(event.data)]);
+      } catch {}
+    };
+    eventSource.addEventListener('historical-end', () => {
+      historicalDone = true;
+      setLoading(false);
+      if (filter.limit !== undefined) {
+        intentionallyClosed = true;
+      }
+    });
+    eventSource.onerror = () => {
+      setStreaming(false);
+      if (!historicalDone && !intentionallyClosed) {
+        setLoading(false);
+        setError('Connection lost');
+      }
+      eventSource.close();
+      eventSourceRef.current = null;
+    };
+  }, [password, filter]);
+
+  return { logs, loading, error, refresh, streaming, hasData };
 }

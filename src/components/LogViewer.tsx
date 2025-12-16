@@ -12,6 +12,7 @@ interface LogViewerProps {
   logs: LogEntry[];
   loading: boolean;
   streaming: boolean;
+  hasData: boolean;
   showAutoScroll?: boolean;
 }
 
@@ -59,7 +60,7 @@ function LogDetail({ entry, onClose }: { entry: LogEntry; onClose: () => void })
   );
 }
 
-export function LogViewer({ logs, loading, streaming, showAutoScroll = false }: LogViewerProps) {
+export function LogViewer({ logs, loading, streaming, hasData, showAutoScroll = false }: LogViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const [selectedEntry, setSelectedEntry] = useState<LogEntry | null>(null);
@@ -92,7 +93,7 @@ export function LogViewer({ logs, loading, streaming, showAutoScroll = false }: 
       <div
         ref={containerRef}
         onScroll={handleScroll}
-        className={`flex-1 overflow-auto bg-background border rounded transition-opacity duration-200 ${loading ? 'opacity-60' : 'opacity-100'}`}
+        className={`flex-1 overflow-auto bg-background border rounded transition-opacity duration-200 ${loading && !hasData ? 'opacity-60' : 'opacity-100'}`}
       >
         {logs.length === 0 ? (
           <div className="p-4 text-center text-muted-foreground">No logs found</div>

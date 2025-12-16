@@ -13,7 +13,8 @@
       "Bash(timeout 3 bun run:*)",
       "Bash(bun test:*)",
       "Bash(cat:*)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(bun run build:client:*)"
     ]
   }
 }

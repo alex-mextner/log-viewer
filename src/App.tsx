@@ -32,7 +32,7 @@ export function App({ initialLogs, initialPassword }: AppProps = {}) {
     [params.from, params.to, params.level, params.limit, params.page]
   );
 
-  const { logs, loading, error, refresh, streaming } = useLogs({
+  const { logs, loading, error, refresh, streaming, hasData } = useLogs({
     password,
     filter,
     autoRefresh: true,
@@ -139,6 +139,7 @@ export function App({ initialLogs, initialPassword }: AppProps = {}) {
         logs={logs}
         loading={loading}
         streaming={streaming}
+        hasData={hasData}
         showAutoScroll={params.limit === undefined && (!params.to || new Date(params.to) >= new Date())}
       />
 
