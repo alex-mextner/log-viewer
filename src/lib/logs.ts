@@ -73,15 +73,19 @@ export async function streamLogs(
   filter: LogFilter,
   onEntry: (entry: LogEntry) => void
 ): Promise<void> {
+  const t0 = performance.now();
+
   if (!LOG_FILE_PATH) {
     throw new Error('LOG_FILE_PATH not configured');
   }
 
   const file = Bun.file(LOG_FILE_PATH);
+  const t1 = performance.now();
 
   if (!(await file.exists())) {
     throw new Error(`Log file not found: ${LOG_FILE_PATH}`);
   }
+  const t2 = performance.now();
 
   // Default to today if no date range specified
   const effectiveFilter: LogFilter = {
@@ -93,26 +97,47 @@ export async function streamLogs(
   const limit = effectiveFilter.limit || 1000;
   let count = 0;
   let buffer = '';
+  let totalLines = 0;
+  let skippedByFilter = 0;
+  let chunkCount = 0;
+  let totalBytes = 0;
 
   const stream = file.stream();
   const reader = stream.getReader();
   const decoder = new TextDecoder();
+  const t3 = performance.now();
+
+  console.log(`[streamLogs] init: file=${(t1-t0).toFixed(1)}ms, exists=${(t2-t1).toFixed(1)}ms, stream=${(t3-t2).toFixed(1)}ms`);
+  console.log(`[streamLogs] filter: from=${effectiveFilter.from?.toISOString()}, to=${effectiveFilter.to?.toISOString()}`);
 
   try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
 
+      chunkCount++;
+      totalBytes += value?.length || 0;
+
+      if (chunkCount === 1) {
+        console.log(`[streamLogs] first chunk: ${(performance.now() - t3).toFixed(1)}ms, ${value?.length} bytes`);
+      }
+
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
       buffer = lines.pop() || '';
 
       for (const line of lines) {
+        totalLines++;
         if (count >= limit) break;
         const entry = parseLogLine(line);
         if (entry && filterLog(entry, effectiveFilter)) {
+          if (count === 0) {
+            console.log(`[streamLogs] first match: ${(performance.now() - t3).toFixed(1)}ms, after ${totalLines} lines, ${skippedByFilter} skipped`);
+          }
           onEntry(entry);
           count++;
+        } else {
+          skippedByFilter++;
         }
       }
 
@@ -121,6 +146,7 @@ export async function streamLogs(
 
     // Process remaining buffer
     if (count < limit && buffer.trim()) {
+      totalLines++;
       const entry = parseLogLine(buffer);
       if (entry && filterLog(entry, effectiveFilter)) {
         onEntry(entry);
@@ -129,6 +155,8 @@ export async function streamLogs(
   } finally {
     reader.releaseLock();
   }
+
+  console.log(`[streamLogs] done: ${(performance.now() - t0).toFixed(1)}ms, ${chunkCount} chunks, ${(totalBytes/1024/1024).toFixed(1)}MB, ${totalLines} lines, ${skippedByFilter} skipped`);
 }
 
 export async function readLogs(filter: LogFilter = {}): Promise<{ logs: LogEntry[]; hasMore: boolean; total: number }> {
