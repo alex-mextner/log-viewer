@@ -130,9 +130,17 @@ export async function findOffsetForDate(file: ReturnType<typeof Bun.file>, targe
   let bestLine = '';
   let offset = low;
 
-  for (const line of lines) {
-    if (!line.trim()) {
-      offset += line.length + 1;
+  // If low > 0, first "line" is likely a partial line (tail of previous line)
+  // Skip it and adjust offset
+  const startIdx = low > 0 ? 1 : 0;
+  if (low > 0 && lines[0]) {
+    offset += lines[0].length + 1; // Skip partial line
+  }
+
+  for (let i = startIdx; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line || !line.trim()) {
+      offset += (line?.length ?? 0) + 1;
       continue;
     }
     // Use strict parsing - only consider lines with valid JSON timestamp
@@ -150,26 +158,11 @@ export async function findOffsetForDate(file: ReturnType<typeof Bun.file>, targe
 
   const foundEntry = parseLogLine(bestLine);
   const foundDate = foundEntry?.time ? parseLogDate(foundEntry.time) : null;
-  console.log(`[binarySearch] found offset ${bestOffset} in ${iterations} iterations, ${(performance.now() - t0).toFixed(1)}ms`);
+  console.log(`[binarySearch] low=${low}, bestOffset=${bestOffset}, iterations=${iterations}, ${(performance.now() - t0).toFixed(1)}ms`);
   console.log(`[binarySearch] target: ${targetDate.toISOString()}, found: ${foundDate?.toISOString() || 'none'}`);
+  console.log(`[binarySearch] firstLine preview: ${bestLine.slice(0, 100)}...`);
 
   return { offset: bestOffset, firstLine: bestLine };
-}
-
-// Align offset to line boundary (read backwards to find newline)
-async function alignToLineStart(file: ReturnType<typeof Bun.file>, offset: number): Promise<number> {
-  if (offset === 0) return 0;
-
-  // Read backwards to find newline
-  const lookback = Math.min(1024, offset);
-  const chunk = await file.slice(offset - lookback, offset).text();
-  const lastNewline = chunk.lastIndexOf('\n');
-
-  if (lastNewline === -1) {
-    return offset - lookback;
-  }
-
-  return offset - lookback + lastNewline + 1;
 }
 
 export function parseLogLine(line: string): LogEntry | null {
@@ -340,8 +333,18 @@ export async function streamLogs(
       for (const line of lines) {
         totalLines++;
         if (count >= limit) break;
-        const entry = parseLogLine(line);
-        if (entry && filterLog(entry, effectiveFilter)) {
+
+        // Only process valid JSON entries with timestamp - skip broken/partial lines
+        const entry = parseLogLineStrict(line);
+        if (!entry) {
+          skippedByFilter++;
+          continue;
+        }
+
+        if (filterLog(entry, effectiveFilter)) {
+          if (count < 5) {
+            console.log(`[streamLogs] match #${count}: time=${entry.time}, msg=${entry.msg?.slice(0, 50)}`);
+          }
           if (count === 0) {
             console.log(`[streamLogs] first match: ${(performance.now() - t2).toFixed(1)}ms, after ${totalLines} lines`);
           }
@@ -350,7 +353,7 @@ export async function streamLogs(
         } else {
           skippedByFilter++;
           // Early exit if we passed the 'to' date (logs are chronological)
-          if (entry && effectiveFilter.to) {
+          if (effectiveFilter.to) {
             const entryDate = parseLogDate(entry.time);
             if (entryDate && isAfter(entryDate, effectiveFilter.to)) {
               console.log(`[streamLogs] passed 'to' date (${entryDate.toISOString()} > ${effectiveFilter.to.toISOString()}), stopping early`);
@@ -366,7 +369,7 @@ export async function streamLogs(
     // Process remaining buffer
     if (count < limit && buffer.trim()) {
       totalLines++;
-      const entry = parseLogLine(buffer);
+      const entry = parseLogLineStrict(buffer);
       if (entry && filterLog(entry, effectiveFilter)) {
         onEntry(entry);
       }
