@@ -11,29 +11,21 @@ interface PaginationProps {
 const LIMIT_OPTIONS = [100, 500, 1000, 5000];
 
 export function Pagination({ total, limit, page = 1, onLimitChange, onPageChange }: PaginationProps) {
-  // Hide pagination controls if no limit set (showing all)
-  if (limit === undefined) {
-    return (
-      <div className="flex items-center gap-2 text-sm">
-        <span className="text-muted-foreground">{total} entries</span>
-      </div>
-    );
-  }
-
-  const totalPages = Math.ceil(total / limit);
-  const currentPage = Math.min(page, totalPages) || 1;
-  const startEntry = (currentPage - 1) * limit + 1;
-  const endEntry = Math.min(currentPage * limit, total);
+  const hasLimit = limit !== undefined;
+  const totalPages = hasLimit ? Math.ceil(total / limit) : 1;
+  const currentPage = hasLimit ? Math.min(page, totalPages) || 1 : 1;
+  const startEntry = hasLimit ? (currentPage - 1) * limit + 1 : 1;
+  const endEntry = hasLimit ? Math.min(currentPage * limit, total) : total;
 
   return (
     <div className="flex items-center gap-2 text-sm flex-wrap">
       {/* Entry count and range */}
       <span className="text-muted-foreground">
-        {total > 0 ? `${startEntry}-${endEntry} of ${total}` : '0 entries'}
+        {total > 0 ? (hasLimit ? `${startEntry}-${endEntry} of ${total}` : `${total} entries`) : '0 entries'}
       </span>
 
-      {/* Page navigation */}
-      {totalPages > 1 && (
+      {/* Page navigation - only when limit is set and multiple pages */}
+      {hasLimit && totalPages > 1 && (
         <>
           <span className="text-muted-foreground">|</span>
           <Button
@@ -60,7 +52,7 @@ export function Pagination({ total, limit, page = 1, onLimitChange, onPageChange
         </>
       )}
 
-      {/* Limit selector */}
+      {/* Limit selector - always visible */}
       <span className="text-muted-foreground">|</span>
       <span className="text-muted-foreground">Per page:</span>
       {LIMIT_OPTIONS.map((opt) => (
@@ -71,13 +63,18 @@ export function Pagination({ total, limit, page = 1, onLimitChange, onPageChange
           className="h-7 px-2"
           onClick={() => {
             onLimitChange(opt);
-            onPageChange(1); // Reset to first page
+            onPageChange(1);
           }}
         >
           {opt}
         </Button>
       ))}
-      <Button variant="outline" size="sm" className="h-7 px-2" onClick={() => onLimitChange(undefined)}>
+      <Button
+        variant={!hasLimit ? 'default' : 'outline'}
+        size="sm"
+        className="h-7 px-2"
+        onClick={() => onLimitChange(undefined)}
+      >
         All
       </Button>
     </div>
