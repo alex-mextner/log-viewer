@@ -6,14 +6,19 @@ import { Label } from '@/components/ui/label';
 import { DateFilter } from '@/components/DateFilter';
 import { LevelFilter } from '@/components/LevelFilter';
 import { LogViewer } from '@/components/LogViewer';
-import { useLogs } from '@/hooks/useLogs';
+import { useLogs, type LogEntry } from '@/hooks/useLogs';
 import { useUrlParams } from '@/hooks/useUrlParams';
 import './index.css';
 
-export function App() {
+export interface AppProps {
+  initialLogs?: LogEntry[];
+  initialPassword?: string;
+}
+
+export function App({ initialLogs, initialPassword }: AppProps = {}) {
   const [params, setParams] = useUrlParams();
-  const [passwordInput, setPasswordInput] = useState(params.pwd || '');
-  const [password, setPassword] = useState(params.pwd || '');
+  const [passwordInput, setPasswordInput] = useState(initialPassword || params.pwd || '');
+  const [password, setPassword] = useState(initialPassword || params.pwd || '');
 
   const filter = useMemo(
     () => ({

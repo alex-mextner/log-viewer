@@ -1,6 +1,7 @@
 import { serve } from 'bun';
 import { checkAuth } from './lib/auth';
 import { formatLogForText, readLogs, streamLogs, tailLogs, type LogFilter } from './lib/logs';
+import { renderInitialHtml } from './lib/ssr';
 
 function parseFilter(url: URL): LogFilter {
   const filter: LogFilter = {};
@@ -64,48 +65,27 @@ const server = serve({
           });
         }
 
-        // Stream initial logs into HTML
+        // SSR: render logs into HTML
         const filter = parseFilter(url);
-        const encoder = new TextEncoder();
+        let ssrContent = '';
 
-        const stream = new ReadableStream({
-          async start(controller) {
-            // Insert initial logs script before </head>
-            const scriptStart = '<script>window.__INITIAL_LOGS__=[';
-            const headEnd = '</head>';
-            const parts = htmlTemplate.split(headEnd);
+        try {
+          const result = await readLogs(filter);
+          const logsJson = JSON.stringify(result.logs);
+          ssrContent = renderInitialHtml(result.logs, logsJson);
+        } catch (err) {
+          console.error('Error reading logs for SSR:', err);
+          ssrContent = '<div class="p-4 text-center text-red-500">Error loading logs</div>';
+        }
 
-            if (parts.length === 2) {
-              controller.enqueue(encoder.encode(parts[0] + scriptStart));
+        // Insert SSR content into #root
+        const html = htmlTemplate.replace(
+          '<div id="root"></div>',
+          `<div id="root">${ssrContent}</div>`
+        );
 
-              // Stream logs as JSON array elements
-              let first = true;
-              try {
-                await streamLogs(filter, (entry) => {
-                  const prefix = first ? '' : ',';
-                  first = false;
-                  controller.enqueue(encoder.encode(prefix + JSON.stringify(entry)));
-                });
-              } catch (err) {
-                // Log error but continue
-                console.error('Error streaming logs:', err);
-              }
-
-              controller.enqueue(encoder.encode('];</script>' + headEnd + parts[1]));
-            } else {
-              // Fallback - just serve template
-              controller.enqueue(encoder.encode(htmlTemplate));
-            }
-
-            controller.close();
-          },
-        });
-
-        return new Response(stream, {
-          headers: {
-            'Content-Type': 'text/html; charset=utf-8',
-            'Transfer-Encoding': 'chunked',
-          },
+        return new Response(html, {
+          headers: { 'Content-Type': 'text/html; charset=utf-8' },
         });
       },
     },
@@ -185,9 +165,18 @@ const server = serve({
           const filter = parseFilter(url);
           const result = await readLogs(filter);
 
-          const text = result.logs.map(formatLogForText).join('\n');
+          const logsText = result.logs.map(formatLogForText).join('\n');
 
-          return new Response(text, {
+          // Header with pagination info for AI agents
+          const header = `# Log Viewer API
+# Total: ${result.total} entries | Showing: ${result.logs.length} | HasMore: ${result.hasMore}
+# Pagination: ?limit=N&offset=N (default limit=1000, offset=0)
+# Filters: ?from=ISO_DATE&to=ISO_DATE&level=info,warn,error
+# Example: ?limit=100&offset=100 for entries 100-199
+# ---
+`;
+
+          return new Response(header + logsText, {
             headers: { 'Content-Type': 'text/plain; charset=utf-8' },
           });
         } catch (error) {
