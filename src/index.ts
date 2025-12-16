@@ -76,21 +76,18 @@ const server = serve({
         const filter = parseFilter(url);
 
         const t3 = performance.now();
-        const { stream, sendStart, sendLogEntry, sendEnd } = createAppStream({
+        // HTML shell is sent IMMEDIATELY when stream is created (in start() callback)
+        const { stream, sendLogEntry, sendEnd } = createAppStream({
           password,
           cssPath,
           jsPath,
         });
         const t4 = performance.now();
-        console.log(`[HTML] createAppStream: ${(t4 - t3).toFixed(1)}ms, total before stream: ${(t4 - t0).toFixed(1)}ms`);
+        console.log(`[HTML] createAppStream + shell sent: ${(t4 - t3).toFixed(1)}ms, total before response: ${(t4 - t0).toFixed(1)}ms`);
 
-        // Start streaming in background
+        // Stream logs in background (shell already sent, browser can start rendering)
         (async () => {
           try {
-            const tStart = performance.now();
-            sendStart();
-            console.log(`[HTML] sendStart (renderToString): ${(performance.now() - tStart).toFixed(1)}ms`);
-
             let count = 0;
             const tLogs = performance.now();
             await streamLogs(filter, (entry) => {

@@ -152,9 +152,18 @@ export interface SSRStreamContext {
   encoder: TextEncoder;
 }
 
+// Pre-render shell HTML at module load (cached)
+let cachedShellHtml: string | null = null;
+function getShellHtml(): { beforeLogs: string; afterLogs: string } {
+  if (!cachedShellHtml) {
+    cachedShellHtml = renderToString(<SSRApp logsCount={0} />);
+  }
+  const [beforeLogs, afterLogs] = cachedShellHtml.split(LOGS_PLACEHOLDER);
+  return { beforeLogs, afterLogs };
+}
+
 export function createAppStream({ password, cssPath, jsPath }: SSROptions): {
   stream: ReadableStream<Uint8Array>;
-  sendStart: () => void;
   sendLogEntry: (entry: LogEntry) => void;
   sendEnd: (logsCount: number) => void;
 } {
@@ -163,24 +172,17 @@ export function createAppStream({ password, cssPath, jsPath }: SSROptions): {
   const t0 = performance.now();
   let logCount = 0;
 
+  // Get cached shell HTML (instant, no renderToString)
+  const { beforeLogs, afterLogs } = getShellHtml();
+
   const stream = new ReadableStream<Uint8Array>({
     start(c) {
       controller = c;
+      // Send HTML shell IMMEDIATELY on stream creation
+      const docStart = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><link rel="icon" type="image/svg+xml" href="/logo.svg"/><title>Log Viewer</title><link rel="stylesheet" href="${cssPath}"/></head><!-- [SSR] shell sent: ${(performance.now() - t0).toFixed(1)}ms --><body><div id="root">`;
+      controller.enqueue(encoder.encode(docStart + beforeLogs));
     },
   });
-
-  const sendStart = () => {
-    const tRender = performance.now();
-    // Render shell with placeholder (logsCount will be updated at the end via JS)
-    const shellHtml = renderToString(<SSRApp logsCount={0} />);
-    const renderTime = performance.now() - tRender;
-    const [beforeLogs] = shellHtml.split(LOGS_PLACEHOLDER);
-
-    const timing = `<!-- [SSR] stream created: ${(performance.now() - t0).toFixed(1)}ms, renderToString: ${renderTime.toFixed(1)}ms -->`;
-    const docStart = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><link rel="icon" type="image/svg+xml" href="/logo.svg"/><title>Log Viewer</title><link rel="stylesheet" href="${cssPath}"/></head>${timing}<body><div id="root">`;
-
-    controller.enqueue(encoder.encode(docStart + beforeLogs));
-  };
 
   const sendLogEntry = (entry: LogEntry) => {
     logCount++;
@@ -191,9 +193,6 @@ export function createAppStream({ password, cssPath, jsPath }: SSROptions): {
   };
 
   const sendEnd = (logsCount: number) => {
-    const shellHtml = renderToString(<SSRApp logsCount={0} />);
-    const [, afterLogs] = shellHtml.split(LOGS_PLACEHOLDER);
-
     const timing = `<!-- [SSR] stream end: ${(performance.now() - t0).toFixed(1)}ms, ${logsCount} entries -->`;
     // Password stored in data attribute for hydration
     const docEnd = `${timing}${afterLogs}</div><script>window.__SSR_PASSWORD__="${password}";window.__SSR_LOGS_COUNT__=${logsCount};</script><script type="module" src="${jsPath}" async></script></body></html>`;
@@ -202,7 +201,7 @@ export function createAppStream({ password, cssPath, jsPath }: SSROptions): {
     controller.close();
   };
 
-  return { stream, sendStart, sendLogEntry, sendEnd };
+  return { stream, sendLogEntry, sendEnd };
 }
 
 // Login page - no logs, just the form shell
