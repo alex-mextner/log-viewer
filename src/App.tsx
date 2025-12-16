@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { DateFilter } from '@/components/DateFilter';
 import { LevelFilter } from '@/components/LevelFilter';
 import { LogViewer } from '@/components/LogViewer';
+import { Pagination } from '@/components/Pagination';
 import { useLogs, type LogEntry } from '@/hooks/useLogs';
 import { useUrlParams } from '@/hooks/useUrlParams';
 import './index.css';
@@ -25,8 +26,10 @@ export function App({ initialLogs, initialPassword }: AppProps = {}) {
       from: params.from,
       to: params.to,
       level: params.level,
+      limit: params.limit,
+      page: params.page,
     }),
-    [params.from, params.to, params.level]
+    [params.from, params.to, params.level, params.limit, params.page]
   );
 
   const { logs, loading, error, refresh, streaming } = useLogs({
@@ -47,6 +50,14 @@ export function App({ initialLogs, initialPassword }: AppProps = {}) {
 
   const handleLevelChange = (level: string[]) => {
     setParams({ level: level.length > 0 ? level : undefined });
+  };
+
+  const handleLimitChange = (limit: number | undefined) => {
+    setParams({ limit, page: undefined }); // Reset page when limit changes
+  };
+
+  const handlePageChange = (page: number) => {
+    setParams({ page: page > 1 ? page : undefined });
   };
 
   // Login screen
@@ -107,6 +118,15 @@ export function App({ initialLogs, initialPassword }: AppProps = {}) {
           <LevelFilter selected={params.level || []} onChange={handleLevelChange} />
         </div>
 
+        {/* Pagination - top */}
+        <Pagination
+          total={logs.length}
+          limit={params.limit}
+          page={params.page}
+          onLimitChange={handleLimitChange}
+          onPageChange={handlePageChange}
+        />
+
         {/* Error message */}
         {error && (
           <div className="bg-destructive/10 text-destructive px-4 py-2 rounded text-sm">{error}</div>
@@ -115,6 +135,17 @@ export function App({ initialLogs, initialPassword }: AppProps = {}) {
 
       {/* Log viewer */}
       <LogViewer logs={logs} loading={loading} streaming={streaming} />
+
+      {/* Pagination - bottom */}
+      <div className="mt-4">
+        <Pagination
+          total={logs.length}
+          limit={params.limit}
+          page={params.page}
+          onLimitChange={handleLimitChange}
+          onPageChange={handlePageChange}
+        />
+      </div>
     </div>
   );
 }

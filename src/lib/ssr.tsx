@@ -97,6 +97,15 @@ function SSRLevelFilter() {
   );
 }
 
+// SSR pagination shows only count (limit controls added by React hydration)
+function SSRPagination({ total }: { total: number }) {
+  return (
+    <div className="flex items-center gap-2 text-sm">
+      <span className="text-muted-foreground">{total} entries</span>
+    </div>
+  );
+}
+
 interface SSRAppProps {
   logsCount: number;
 }
@@ -123,6 +132,8 @@ function SSRApp({ logsCount }: SSRAppProps) {
           <SSRDateFilter />
           <SSRLevelFilter />
         </div>
+        {/* Pagination - top (will be hydrated with controls) */}
+        <SSRPagination total={logsCount} />
       </div>
 
       {/* Log viewer - placeholder will be replaced with streamed content */}
@@ -132,10 +143,9 @@ function SSRApp({ logsCount }: SSRAppProps) {
         dangerouslySetInnerHTML={{ __html: LOGS_PLACEHOLDER }}
       />
 
-      {/* Status bar */}
-      <div className="flex items-center justify-between text-xs text-muted-foreground px-2 py-1">
-        <span>{logsCount} entries</span>
-        <span>SSR</span>
+      {/* Pagination - bottom */}
+      <div className="mt-4">
+        <SSRPagination total={logsCount} />
       </div>
     </div>
   );
@@ -179,12 +189,21 @@ export function createAppStream({ password, cssPath, jsPath }: SSROptions): {
     start(c) {
       controller = c;
       // Send HTML shell IMMEDIATELY on stream creation
-      const docStart = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><link rel="icon" type="image/svg+xml" href="/logo.svg"/><title>Log Viewer</title><link rel="stylesheet" href="${cssPath}"/></head><!-- [SSR] shell sent: ${(performance.now() - t0).toFixed(1)}ms --><body><div id="root">`;
+      const paramsDoc = `<!--
+  Log Viewer URL Parameters:
+  - pwd: string (required) - API password
+  - from: datetime-local - Start date filter (default: today 00:00)
+  - to: datetime-local - End date filter (default: today 23:59)
+  - level: string - Comma-separated log levels: debug,info,warn,error
+  - limit: number - Entries per page (100, 500, 1000, 5000)
+  - page: number - Page number (starts from 1, only with limit)
+
+  Example: ?pwd=xxx&from=2025-12-10T00:00&to=2025-12-16T23:59&limit=100&page=2
+-->`;
+      const docStart = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><link rel="icon" type="image/svg+xml" href="/logo.svg"/><title>Log Viewer</title><link rel="stylesheet" href="${cssPath}"/></head>${paramsDoc}<!-- [SSR] shell sent: ${(performance.now() - t0).toFixed(1)}ms --><body><div id="root">`;
       // Loading indicator that will be replaced by first log entry
       const loadingIndicator = `<div id="ssr-loading" class="flex items-center justify-center p-8 text-muted-foreground"><span class="animate-pulse">Loading logs...</span></div>`;
-      // Padding to force browser flush (some browsers buffer small chunks)
-      const flushPadding = `<!-- ${'x'.repeat(1024)} -->`;
-      controller.enqueue(encoder.encode(docStart + beforeLogs + loadingIndicator + flushPadding));
+      controller.enqueue(encoder.encode(docStart + beforeLogs + loadingIndicator));
     },
   });
 

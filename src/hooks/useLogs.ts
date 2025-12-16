@@ -12,6 +12,8 @@ export interface LogFilter {
   from?: string;
   to?: string;
   level?: string[];
+  limit?: number;
+  page?: number;
 }
 
 interface UseLogsOptions {
@@ -36,6 +38,14 @@ function buildUrl(endpoint: string, password: string, filter: LogFilter): string
   if (filter.from) params.set('from', filter.from);
   if (filter.to) params.set('to', filter.to);
   if (filter.level?.length) params.set('level', filter.level.join(','));
+  if (filter.limit !== undefined) {
+    params.set('limit', String(filter.limit));
+    // Calculate offset from page
+    const page = filter.page || 1;
+    if (page > 1) {
+      params.set('offset', String((page - 1) * filter.limit));
+    }
+  }
 
   return `${endpoint}?${params.toString()}`;
 }

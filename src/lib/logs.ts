@@ -374,7 +374,7 @@ export async function streamLogs(
     }
   }
 
-  const limit = effectiveFilter.limit || 1000;
+  const limit = effectiveFilter.limit; // No default - show all if not specified
   let count = 0;
   let buffer = '';
   let totalLines = 0;
@@ -409,7 +409,7 @@ export async function streamLogs(
 
       for (const line of lines) {
         totalLines++;
-        if (count >= limit) break;
+        if (limit !== undefined && count >= limit) break;
 
         // Only process valid JSON entries with timestamp - skip broken/partial lines
         const entry = parseLogLineStrict(line);
@@ -440,11 +440,11 @@ export async function streamLogs(
         }
       }
 
-      if (count >= limit) break;
+      if (limit !== undefined && count >= limit) break;
     }
 
     // Process remaining buffer
-    if (count < limit && buffer.trim()) {
+    if ((limit === undefined || count < limit) && buffer.trim()) {
       totalLines++;
       const entry = parseLogLineStrict(buffer);
       if (entry && filterLog(entry, effectiveFilter)) {
@@ -476,7 +476,7 @@ export async function readLogs(filter: LogFilter = {}): Promise<{ logs: LogEntry
     to: filter.to ?? getTodayEnd(),
   };
 
-  const limit = effectiveFilter.limit || 1000;
+  const limit = effectiveFilter.limit; // No default - show all if not specified
   const offset = effectiveFilter.offset || 0;
   const matchedEntries: LogEntry[] = [];
   let buffer = '';
@@ -515,11 +515,11 @@ export async function readLogs(filter: LogFilter = {}): Promise<{ logs: LogEntry
   }
 
   const total = matchedEntries.length;
-  const logs = matchedEntries.slice(offset, offset + limit);
+  const logs = limit !== undefined ? matchedEntries.slice(offset, offset + limit) : matchedEntries.slice(offset);
 
   return {
     logs,
-    hasMore: offset + limit < total,
+    hasMore: limit !== undefined && offset + limit < total,
     total,
   };
 }

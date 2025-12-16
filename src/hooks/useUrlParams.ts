@@ -5,6 +5,8 @@ interface UrlParams {
   to?: string;
   level?: string[];
   pwd?: string;
+  limit?: number;
+  page?: number;
 }
 
 function getTodayDateString(): string {
@@ -28,11 +30,15 @@ export function useUrlParams(): [UrlParams, (params: Partial<UrlParams>) => void
     if (typeof window === 'undefined') return {};
 
     const searchParams = new URLSearchParams(window.location.search);
+    const limitStr = searchParams.get('limit');
+    const pageStr = searchParams.get('page');
     return {
       from: searchParams.get('from') || getDefaultFrom(),
       to: searchParams.get('to') || getDefaultTo(),
       level: searchParams.get('level')?.split(',') || undefined,
       pwd: searchParams.get('pwd') || undefined,
+      limit: limitStr ? parseInt(limitStr, 10) : undefined,
+      page: pageStr ? parseInt(pageStr, 10) : undefined,
     };
   });
 
@@ -46,6 +52,11 @@ export function useUrlParams(): [UrlParams, (params: Partial<UrlParams>) => void
       if (updated.from) searchParams.set('from', updated.from);
       if (updated.to) searchParams.set('to', updated.to);
       if (updated.level?.length) searchParams.set('level', updated.level.join(','));
+      if (updated.limit !== undefined) searchParams.set('limit', String(updated.limit));
+      // page only makes sense with limit
+      if (updated.limit !== undefined && updated.page !== undefined && updated.page > 1) {
+        searchParams.set('page', String(updated.page));
+      }
 
       const newUrl = `${window.location.pathname}?${searchParams.toString()}`;
       window.history.replaceState({}, '', newUrl);
@@ -58,11 +69,15 @@ export function useUrlParams(): [UrlParams, (params: Partial<UrlParams>) => void
   useEffect(() => {
     const handlePopState = () => {
       const searchParams = new URLSearchParams(window.location.search);
+      const limitStr = searchParams.get('limit');
+      const pageStr = searchParams.get('page');
       setParamsState({
         from: searchParams.get('from') || undefined,
         to: searchParams.get('to') || undefined,
         level: searchParams.get('level')?.split(',') || undefined,
         pwd: searchParams.get('pwd') || undefined,
+        limit: limitStr ? parseInt(limitStr, 10) : undefined,
+        page: pageStr ? parseInt(pageStr, 10) : undefined,
       });
     };
 
