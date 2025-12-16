@@ -177,25 +177,7 @@ export function createAppStream({ password, cssPath, jsPath }: SSROptions): {
     const [beforeLogs] = shellHtml.split(LOGS_PLACEHOLDER);
 
     const timing = `<!-- [SSR] stream created: ${(performance.now() - t0).toFixed(1)}ms, renderToString: ${renderTime.toFixed(1)}ms -->`;
-    // Critical inline CSS for instant render, full CSS loads async
-    const criticalCss = `<style>
-      :root{--background:0 0% 100%;--foreground:240 10% 3.9%;--muted-foreground:240 3.8% 46.1%;--accent:240 4.8% 95.9%;--border:240 5.9% 90%}
-      .dark{--background:240 10% 3.9%;--foreground:0 0% 98%;--muted-foreground:240 5% 64.9%;--accent:240 3.7% 15.9%;--border:240 3.7% 15.9%}
-      *{box-sizing:border-box;margin:0;padding:0}
-      body{font-family:system-ui,sans-serif;background:hsl(var(--background));color:hsl(var(--foreground))}
-      .min-h-screen{min-height:100vh}.flex{display:flex}.flex-col{flex-direction:column}.flex-1{flex:1}
-      .p-4{padding:1rem}.mb-4{margin-bottom:1rem}.gap-2{gap:.5rem}.gap-4{gap:1rem}
-      .text-xl{font-size:1.25rem}.font-semibold{font-weight:600}.font-mono{font-family:ui-monospace,monospace}
-      .text-sm{font-size:.875rem}.text-xs{font-size:.75rem}.truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-      .overflow-auto{overflow:auto}.border{border:1px solid hsl(var(--border))}.rounded{border-radius:.375rem}
-      .bg-background{background:hsl(var(--background))}.text-muted-foreground{color:hsl(var(--muted-foreground))}
-      .shrink-0{flex-shrink:0}.items-center{align-items:center}.justify-between{justify-content:space-between}
-      .px-2{padding-left:.5rem;padding-right:.5rem}.py-1{padding-top:.25rem;padding-bottom:.25rem}.py-0\\.5{padding-top:.125rem;padding-bottom:.125rem}
-      .hover\\:bg-accent:hover{background:hsl(var(--accent))}.cursor-pointer{cursor:pointer}
-      .w-12{width:3rem}.w-24{width:6rem}.uppercase{text-transform:uppercase}
-      .text-gray-400{color:#9ca3af}.text-blue-400{color:#60a5fa}.text-yellow-400{color:#facc15}.text-red-400{color:#f87171}
-    </style>`;
-    const docStart = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><link rel="icon" type="image/svg+xml" href="/logo.svg"/><title>Log Viewer</title>${criticalCss}<link rel="stylesheet" href="${cssPath}" media="print" onload="this.media='all'"/><noscript><link rel="stylesheet" href="${cssPath}"/></noscript></head>${timing}<body><div id="root">`;
+    const docStart = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><link rel="icon" type="image/svg+xml" href="/logo.svg"/><title>Log Viewer</title><link rel="stylesheet" href="${cssPath}"/></head>${timing}<body><div id="root">`;
 
     controller.enqueue(encoder.encode(docStart + beforeLogs));
   };

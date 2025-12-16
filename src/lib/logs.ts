@@ -1,9 +1,34 @@
+import { parseISO, isAfter, isBefore, isEqual } from 'date-fns';
+
 export interface LogEntry {
   level: string;
   time: string;
   module?: string;
   msg: string;
   [key: string]: unknown;
+}
+
+// Parse date from log entry - handles various formats
+function parseLogDate(timeStr: string): Date | null {
+  if (!timeStr) return null;
+  try {
+    // Try ISO format first (most common)
+    const parsed = parseISO(timeStr);
+    if (!isNaN(parsed.getTime())) return parsed;
+    // Fallback to native Date
+    const native = new Date(timeStr);
+    if (!isNaN(native.getTime())) return native;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// Compare dates: returns -1 if a < b, 0 if equal, 1 if a > b
+function compareDates(a: Date, b: Date): number {
+  if (isBefore(a, b)) return -1;
+  if (isAfter(a, b)) return 1;
+  return 0;
 }
 
 export interface LogFilter {
@@ -43,7 +68,6 @@ function isCacheValidForDate(cache: OffsetCache, fromDate: Date): boolean {
 // Binary search to find byte offset where entries >= targetDate start
 async function findOffsetForDate(file: ReturnType<typeof Bun.file>, targetDate: Date, fileSize: number): Promise<{ offset: number; firstLine: string }> {
   const t0 = performance.now();
-  const targetTime = targetDate.getTime();
 
   let low = 0;
   let high = fileSize;
@@ -83,9 +107,15 @@ async function findOffsetForDate(file: ReturnType<typeof Bun.file>, targetDate: 
       continue;
     }
 
-    const entryTime = new Date(entry.time).getTime();
+    const entryDate = parseLogDate(entry.time);
+    if (!entryDate) {
+      high = mid;
+      continue;
+    }
 
-    if (entryTime < targetTime) {
+    const cmp = compareDates(entryDate, targetDate);
+
+    if (cmp < 0) {
       // Entry is before target, search in right half
       low = lineStart;
     } else {
@@ -110,8 +140,8 @@ async function findOffsetForDate(file: ReturnType<typeof Bun.file>, targetDate: 
       }
       const entry = parseLogLine(line);
       if (entry?.time) {
-        const entryTime = new Date(entry.time).getTime();
-        if (entryTime >= targetTime) {
+        const entryDate = parseLogDate(entry.time);
+        if (entryDate && compareDates(entryDate, targetDate) >= 0) {
           bestOffset = offset;
           bestLine = line;
           break;
@@ -122,7 +152,9 @@ async function findOffsetForDate(file: ReturnType<typeof Bun.file>, targetDate: 
   }
 
   const foundEntry = parseLogLine(bestLine);
-  console.log(`[binarySearch] found offset ${bestOffset} in ${iterations} iterations, ${(performance.now() - t0).toFixed(1)}ms, first entry: ${foundEntry?.time || 'none'}`);
+  const foundDate = foundEntry?.time ? parseLogDate(foundEntry.time) : null;
+  console.log(`[binarySearch] found offset ${bestOffset} in ${iterations} iterations, ${(performance.now() - t0).toFixed(1)}ms`);
+  console.log(`[binarySearch] target: ${targetDate.toISOString()}, found: ${foundDate?.toISOString() || 'none'}`);
 
   return { offset: bestOffset, firstLine: bestLine };
 }
@@ -168,13 +200,14 @@ export function filterLog(entry: LogEntry, filter: LogFilter): boolean {
 
   // Filter by time range
   if (filter.from || filter.to) {
-    const entryTime = new Date(entry.time);
+    const entryDate = parseLogDate(entry.time);
+    if (!entryDate) return false;
 
-    if (filter.from && entryTime < filter.from) {
+    if (filter.from && isBefore(entryDate, filter.from)) {
       return false;
     }
 
-    if (filter.to && entryTime > filter.to) {
+    if (filter.to && isAfter(entryDate, filter.to)) {
       return false;
     }
   }
@@ -304,9 +337,9 @@ export async function streamLogs(
           skippedByFilter++;
           // Early exit if we passed the 'to' date (logs are chronological)
           if (entry && effectiveFilter.to) {
-            const entryTime = new Date(entry.time);
-            if (entryTime > effectiveFilter.to) {
-              console.log(`[streamLogs] passed 'to' date, stopping early`);
+            const entryDate = parseLogDate(entry.time);
+            if (entryDate && isAfter(entryDate, effectiveFilter.to)) {
+              console.log(`[streamLogs] passed 'to' date (${entryDate.toISOString()} > ${effectiveFilter.to.toISOString()}), stopping early`);
               break;
             }
           }
