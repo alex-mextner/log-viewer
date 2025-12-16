@@ -19,6 +19,8 @@ function parseFilter(url: URL): LogFilter {
   if (limit) filter.limit = parseInt(limit, 10);
   if (offset) filter.offset = parseInt(offset, 10);
 
+  console.log(`[parseFilter] from=${from} -> ${filter.from?.toISOString()}, to=${to} -> ${filter.to?.toISOString()}`);
+
   return filter;
 }
 
