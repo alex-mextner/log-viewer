@@ -1,8 +1,8 @@
----
-description: Use Bun instead of Node.js, npm, pnpm, or vite.
-globs: "*.ts, *.tsx, *.html, *.css, *.js, *.jsx, package.json"
-alwaysApply: false
----
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Runtime
 
 Default to using Bun instead of Node.js.
 
@@ -47,6 +47,9 @@ Query params: `pwd`, `from`, `to`, `level`, `limit`
 bun dev          # Start dev server with HMR
 bun run build    # Build for production
 bun start        # Run production server
+bun test         # Run tests
+bun run lint     # Check with Biome
+bun run lint:fix # Auto-fix lint issues
 ```
 
 ## Config
@@ -63,12 +66,32 @@ NDJSON with fields: `level`, `time`, `module`, `msg`, plus any extras.
 {"level":"info","time":"2025-12-12T08:00:00Z","module":"scheduler","msg":"Started"}
 ```
 
-## Bun APIs Used
+## Architecture
 
-- `Bun.serve()` with routes for API
-- `Bun.file()` for log reading
-- HTML imports for frontend bundling
-- SSE via ReadableStream
+### Server-Side Rendering (SSR)
+
+The app uses streaming SSR for instant perceived load:
+
+1. **Server** (`src/index.ts`) handles routes via `Bun.serve()` with declarative routes
+2. **SSR layer** (`src/lib/ssr.tsx`) streams HTML shell immediately, then log entries one by one
+3. **Hydration**: Client React app picks up SSR HTML via `data-log-item` attributes
+4. **Real-time**: After historical logs, SSE stream continues for live updates
+
+Flow: Request → Auth check → Stream HTML shell → Stream log rows → Close with hydration script → Client hydrates
+
+### Log Processing
+
+`src/lib/logs.ts` handles large log files efficiently:
+- **Binary search** (`findOffsetForDate`) to skip to relevant date range in multi-MB files
+- **Offset caching** for repeated queries with similar date ranges
+- **Streaming read** with chunked parsing to avoid loading entire file into memory
+- **File watching** (`tailLogs`) for real-time updates via `fs.watch`
+
+### Client State
+
+- `useLogs` hook manages SSE connection lifecycle
+- SSR logs are passed via `window.__SSR_PASSWORD__` and `data-log-item` attributes
+- Filter state synced to URL params for shareable links
 
 ## Deploy
 
