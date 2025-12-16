@@ -97,11 +97,26 @@ function SSRLevelFilter() {
   );
 }
 
-// SSR pagination shows only count (limit controls added by React hydration)
+const LIMIT_OPTIONS = [100, 500, 1000, 5000];
+
+// SSR pagination - must match client structure for hydration
 function SSRPagination({ total }: { total: number }) {
   return (
-    <div className="flex items-center gap-2 text-sm">
+    <div className="flex items-center gap-2 text-sm flex-wrap">
       <span className="text-muted-foreground">{total} entries</span>
+      <span className="text-muted-foreground">|</span>
+      <span className="text-muted-foreground">Per page:</span>
+      {LIMIT_OPTIONS.map((opt) => (
+        <button
+          key={opt}
+          className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-xs font-medium border border-input bg-background h-7 px-2"
+        >
+          {opt}
+        </button>
+      ))}
+      <button className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-xs font-medium bg-primary text-primary-foreground h-7 px-2">
+        All
+      </button>
     </div>
   );
 }
