@@ -31,15 +31,21 @@ function formatTime(time: string): string {
   }
 }
 
+// Escape HTML special chars
+function escapeHtml(str: string): string {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 // Pure HTML string for a log row (for streaming)
-function logRowToHtml(entry: LogEntry): string {
+// data-log-item contains JSON for React hydration
+export function logRowToHtml(entry: LogEntry): string {
   const levelColor = LEVEL_COLORS[entry.level] || 'text-gray-400';
   const time = formatTime(entry.time);
   const module = entry.module || '-';
-  // Escape HTML
-  const msg = (entry.msg || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const msg = escapeHtml(entry.msg || '');
+  const json = escapeHtml(JSON.stringify(entry));
 
-  return `<div class="flex gap-2 px-2 py-0.5 hover:bg-accent cursor-pointer text-sm font-mono"><span class="text-muted-foreground shrink-0">${time}</span><span class="shrink-0 w-12 uppercase ${levelColor}">${entry.level}</span><span class="text-muted-foreground shrink-0 w-24 truncate">${module}</span><span class="truncate">${msg}</span></div>`;
+  return `<div class="flex gap-2 px-2 py-0.5 hover:bg-accent cursor-pointer text-sm font-mono" data-log-item="${json}"><span class="text-muted-foreground shrink-0">${time}</span><span class="shrink-0 w-12 uppercase ${levelColor}">${entry.level}</span><span class="text-muted-foreground shrink-0 w-24 truncate">${module}</span><span class="truncate">${msg}</span></div>`;
 }
 
 // SSR-only filter components (no handlers, just UI shell)
@@ -136,47 +142,57 @@ function SSRApp({ logsCount }: SSRAppProps) {
 }
 
 export interface SSROptions {
-  logs: LogEntry[];
   password: string;
   cssPath: string;
   jsPath: string;
 }
 
-export async function renderAppToStream({ logs, password, cssPath, jsPath }: SSROptions): Promise<ReadableStream> {
-  const initialData = {
-    initialLogs: logs,
-    initialPassword: password,
-  };
+export interface SSRStreamContext {
+  controller: ReadableStreamDefaultController<Uint8Array>;
+  encoder: TextEncoder;
+}
 
-  // Render shell with placeholder
-  const shellHtml = renderToString(<SSRApp logsCount={logs.length} />);
-
-  // Split by placeholder
-  const [beforeLogs, afterLogs] = shellHtml.split(LOGS_PLACEHOLDER);
-
-  // Build document parts
-  const docStart = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><link rel="icon" type="image/svg+xml" href="/logo.svg"/><title>Log Viewer</title><link rel="stylesheet" href="${cssPath}"/></head><body><div id="root">`;
-
-  const docEnd = `</div><script>window.__INITIAL_DATA__=${JSON.stringify(initialData)};</script><script type="module" src="${jsPath}" async></script></body></html>`;
-
+export function createAppStream({ password, cssPath, jsPath }: SSROptions): {
+  stream: ReadableStream<Uint8Array>;
+  sendStart: () => void;
+  sendLogEntry: (entry: LogEntry) => void;
+  sendEnd: (logsCount: number) => void;
+} {
   const encoder = new TextEncoder();
+  let controller: ReadableStreamDefaultController<Uint8Array>;
 
-  return new ReadableStream({
-    async start(controller) {
-      // 1. Send document start + shell before logs
-      controller.enqueue(encoder.encode(docStart + beforeLogs));
-
-      // 2. Stream logs one by one
-      for (const entry of logs) {
-        controller.enqueue(encoder.encode(logRowToHtml(entry)));
-      }
-
-      // 3. Send shell after logs + document end
-      controller.enqueue(encoder.encode(afterLogs + docEnd));
-
-      controller.close();
+  const stream = new ReadableStream<Uint8Array>({
+    start(c) {
+      controller = c;
     },
   });
+
+  const sendStart = () => {
+    // Render shell with placeholder (logsCount will be updated at the end via JS)
+    const shellHtml = renderToString(<SSRApp logsCount={0} />);
+    const [beforeLogs] = shellHtml.split(LOGS_PLACEHOLDER);
+
+    const docStart = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><link rel="icon" type="image/svg+xml" href="/logo.svg"/><title>Log Viewer</title><link rel="stylesheet" href="${cssPath}"/></head><body><div id="root">`;
+
+    controller.enqueue(encoder.encode(docStart + beforeLogs));
+  };
+
+  const sendLogEntry = (entry: LogEntry) => {
+    controller.enqueue(encoder.encode(logRowToHtml(entry)));
+  };
+
+  const sendEnd = (logsCount: number) => {
+    const shellHtml = renderToString(<SSRApp logsCount={0} />);
+    const [, afterLogs] = shellHtml.split(LOGS_PLACEHOLDER);
+
+    // Password stored in data attribute for hydration
+    const docEnd = `${afterLogs}</div><script>window.__SSR_PASSWORD__="${password}";window.__SSR_LOGS_COUNT__=${logsCount};</script><script type="module" src="${jsPath}" async></script></body></html>`;
+
+    controller.enqueue(encoder.encode(docEnd));
+    controller.close();
+  };
+
+  return { stream, sendStart, sendLogEntry, sendEnd };
 }
 
 // Login page - no logs, just the form shell

@@ -1,8 +1,8 @@
 import { serve } from 'bun';
 import { readdir } from 'node:fs/promises';
 import { checkAuth } from './lib/auth';
-import { formatLogForText, readLogs, tailLogs, type LogFilter } from './lib/logs';
-import { renderAppToStream, renderLoginPage } from './lib/ssr';
+import { formatLogForText, readLogs, streamLogs, tailLogs, type LogFilter } from './lib/logs';
+import { createAppStream, renderLoginPage } from './lib/ssr';
 
 function parseFilter(url: URL): LogFilter {
   const filter: LogFilter = {};
@@ -65,29 +65,36 @@ const server = serve({
           });
         }
 
-        // SSR: stream logs as HTML
+        // SSR: stream logs as HTML line by line
         const filter = parseFilter(url);
 
-        try {
-          const result = await readLogs(filter);
-          const stream = await renderAppToStream({
-            logs: result.logs,
-            password,
-            cssPath,
-            jsPath,
-          });
+        const { stream, sendStart, sendLogEntry, sendEnd } = createAppStream({
+          password,
+          cssPath,
+          jsPath,
+        });
 
-          return new Response(stream, {
-            headers: { 'Content-Type': 'text/html; charset=utf-8' },
-          });
-        } catch (err) {
-          console.error('Error reading logs for SSR:', err);
-          // Fallback to login page on error
-          const stream = await renderLoginPage(cssPath, jsPath);
-          return new Response(stream, {
-            headers: { 'Content-Type': 'text/html; charset=utf-8' },
-          });
-        }
+        // Start streaming in background
+        (async () => {
+          try {
+            sendStart();
+
+            let count = 0;
+            await streamLogs(filter, (entry) => {
+              sendLogEntry(entry);
+              count++;
+            });
+
+            sendEnd(count);
+          } catch (err) {
+            console.error('Error streaming logs:', err);
+            sendEnd(0);
+          }
+        })();
+
+        return new Response(stream, {
+          headers: { 'Content-Type': 'text/html; charset=utf-8' },
+        });
       },
     },
 
