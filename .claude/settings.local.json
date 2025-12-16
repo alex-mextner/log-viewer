@@ -10,7 +10,8 @@
       "Bash(dig:*)",
       "Bash(bun run build:*)",
       "Bash(bun run tsc:*)",
-      "Bash(timeout 3 bun run:*)"
+      "Bash(timeout 3 bun run:*)",
+      "Bash(bun test:*)"
     ]
   }
 }

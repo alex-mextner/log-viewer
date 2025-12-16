@@ -99,19 +99,17 @@ export async function findOffsetForDate(file: ReturnType<typeof Bun.file>, targe
       continue;
     }
 
-    const entry = parseLogLine(line);
-    if (!entry?.time) {
+    // Use strict parsing - ignore non-JSON or lines without valid timestamp
+    const entry = parseLogLineStrict(line);
+    if (!entry) {
+      // Can't determine date, try left half
       high = mid;
       continue;
     }
 
     const entryDate = parseLogDate(entry.time);
-    if (!entryDate) {
-      high = mid;
-      continue;
-    }
-
-    const cmp = compareDates(entryDate, targetDate);
+    // entryDate is guaranteed valid by parseLogLineStrict
+    const cmp = compareDates(entryDate!, targetDate);
 
     if (cmp < 0) {
       // Entry is before target, search in right half
@@ -137,8 +135,9 @@ export async function findOffsetForDate(file: ReturnType<typeof Bun.file>, targe
       offset += line.length + 1;
       continue;
     }
-    const entry = parseLogLine(line);
-    if (entry?.time) {
+    // Use strict parsing - only consider lines with valid JSON timestamp
+    const entry = parseLogLineStrict(line);
+    if (entry) {
       const entryDate = parseLogDate(entry.time);
       if (entryDate && compareDates(entryDate, targetDate) >= 0) {
         bestOffset = offset;
@@ -185,6 +184,23 @@ export function parseLogLine(line: string): LogEntry | null {
       time: new Date().toISOString(),
       msg: line,
     };
+  }
+}
+
+// Parse log line for binary search - only returns entry if it has valid JSON timestamp
+// Returns null for non-JSON or entries without parseable time field
+function parseLogLineStrict(line: string): LogEntry | null {
+  if (!line.trim()) return null;
+
+  try {
+    const entry = JSON.parse(line) as LogEntry;
+    // Must have a time field that can be parsed
+    if (!entry.time) return null;
+    const date = parseLogDate(entry.time);
+    if (!date) return null;
+    return entry;
+  } catch {
+    return null;
   }
 }
 

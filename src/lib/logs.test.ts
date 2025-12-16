@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
-import { writeFileSync, unlinkSync, mkdirSync, rmSync } from 'fs';
-import { join } from 'path';
+import { writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   parseLogDate,
   compareDates,
@@ -11,354 +11,829 @@ import {
   type LogFilter,
 } from './logs';
 
+// ============================================================================
+// UNIT TESTS: parseLogDate
+// ============================================================================
+
 describe('parseLogDate', () => {
-  test('parses ISO format with Z', () => {
-    const date = parseLogDate('2025-12-14T10:30:00.000Z');
-    expect(date).not.toBeNull();
-    expect(date?.toISOString()).toBe('2025-12-14T10:30:00.000Z');
+  describe('ISO 8601 formats', () => {
+    test('parses full ISO with milliseconds and Z', () => {
+      const date = parseLogDate('2025-12-14T10:30:00.000Z');
+      expect(date).not.toBeNull();
+      expect(date?.toISOString()).toBe('2025-12-14T10:30:00.000Z');
+    });
+
+    test('parses ISO without milliseconds', () => {
+      const date = parseLogDate('2025-12-14T10:30:00Z');
+      expect(date).not.toBeNull();
+      expect(date?.getUTCHours()).toBe(10);
+      expect(date?.getUTCMinutes()).toBe(30);
+    });
+
+    test('parses ISO without Z (local time)', () => {
+      const date = parseLogDate('2025-12-14T10:30:00');
+      expect(date).not.toBeNull();
+      expect(date?.getHours()).toBe(10);
+    });
+
+    test('parses ISO with timezone offset', () => {
+      const date = parseLogDate('2025-12-14T10:30:00+03:00');
+      expect(date).not.toBeNull();
+      expect(date?.getUTCHours()).toBe(7); // 10:30 +03:00 = 07:30 UTC
+    });
+
+    test('parses ISO with negative timezone offset', () => {
+      const date = parseLogDate('2025-12-14T10:30:00-05:00');
+      expect(date).not.toBeNull();
+      expect(date?.getUTCHours()).toBe(15); // 10:30 -05:00 = 15:30 UTC
+    });
   });
 
-  test('parses ISO format without ms', () => {
-    const date = parseLogDate('2025-12-14T10:30:00Z');
-    expect(date).not.toBeNull();
-    expect(date?.getUTCHours()).toBe(10);
-    expect(date?.getUTCMinutes()).toBe(30);
+  describe('alternative formats', () => {
+    test('parses date with space instead of T', () => {
+      const date = parseLogDate('2025-12-14 10:30:00');
+      expect(date).not.toBeNull();
+    });
+
+    test('parses date-only string', () => {
+      const date = parseLogDate('2025-12-14');
+      expect(date).not.toBeNull();
+      expect(date?.getUTCFullYear()).toBe(2025);
+      expect(date?.getUTCMonth()).toBe(11); // December = 11
+      expect(date?.getUTCDate()).toBe(14);
+    });
   });
 
-  test('parses ISO format without Z (local time)', () => {
-    const date = parseLogDate('2025-12-14T10:30:00');
-    expect(date).not.toBeNull();
-    expect(date?.getHours()).toBe(10);
+  describe('invalid inputs', () => {
+    test('returns null for empty string', () => {
+      expect(parseLogDate('')).toBeNull();
+    });
+
+    test('returns null for whitespace', () => {
+      expect(parseLogDate('   ')).toBeNull();
+    });
+
+    test('returns null for garbage', () => {
+      expect(parseLogDate('not-a-date')).toBeNull();
+      expect(parseLogDate('invalid')).toBeNull();
+      // Note: '12345' parses as year 12345 by date-fns, which is technically valid
+    });
+
+    test('handles partial dates (date-fns behavior)', () => {
+      // date-fns parseISO handles these as valid partial dates
+      // '2025' -> 2025-01-01, '2025-12' -> 2025-12-01
+      const year = parseLogDate('2025');
+      expect(year).not.toBeNull();
+      expect(year?.getUTCFullYear()).toBe(2025);
+
+      const yearMonth = parseLogDate('2025-12');
+      expect(yearMonth).not.toBeNull();
+      expect(yearMonth?.getUTCMonth()).toBe(11);
+    });
   });
 
-  test('parses date with space instead of T', () => {
-    const date = parseLogDate('2025-12-14 10:30:00');
-    expect(date).not.toBeNull();
-  });
+  describe('edge cases', () => {
+    test('handles midnight', () => {
+      const date = parseLogDate('2025-12-14T00:00:00.000Z');
+      expect(date?.getUTCHours()).toBe(0);
+      expect(date?.getUTCMinutes()).toBe(0);
+    });
 
-  test('returns null for invalid date', () => {
-    expect(parseLogDate('')).toBeNull();
-    expect(parseLogDate('not-a-date')).toBeNull();
-    expect(parseLogDate('invalid')).toBeNull();
+    test('handles end of day', () => {
+      const date = parseLogDate('2025-12-14T23:59:59.999Z');
+      expect(date?.getUTCHours()).toBe(23);
+      expect(date?.getUTCMinutes()).toBe(59);
+    });
+
+    test('handles leap year date', () => {
+      const date = parseLogDate('2024-02-29T12:00:00Z');
+      expect(date).not.toBeNull();
+      expect(date?.getUTCDate()).toBe(29);
+    });
   });
 });
+
+// ============================================================================
+// UNIT TESTS: compareDates
+// ============================================================================
 
 describe('compareDates', () => {
-  test('returns -1 when a < b', () => {
-    const a = new Date('2025-12-14T10:00:00Z');
-    const b = new Date('2025-12-14T11:00:00Z');
-    expect(compareDates(a, b)).toBe(-1);
+  describe('basic comparisons', () => {
+    test('returns -1 when a < b', () => {
+      const a = new Date('2025-12-14T10:00:00Z');
+      const b = new Date('2025-12-14T11:00:00Z');
+      expect(compareDates(a, b)).toBe(-1);
+    });
+
+    test('returns 1 when a > b', () => {
+      const a = new Date('2025-12-14T12:00:00Z');
+      const b = new Date('2025-12-14T11:00:00Z');
+      expect(compareDates(a, b)).toBe(1);
+    });
+
+    test('returns 0 when a == b', () => {
+      const a = new Date('2025-12-14T10:00:00Z');
+      const b = new Date('2025-12-14T10:00:00Z');
+      expect(compareDates(a, b)).toBe(0);
+    });
   });
 
-  test('returns 1 when a > b', () => {
-    const a = new Date('2025-12-14T12:00:00Z');
-    const b = new Date('2025-12-14T11:00:00Z');
-    expect(compareDates(a, b)).toBe(1);
+  describe('cross-boundary comparisons', () => {
+    test('compares across day boundary', () => {
+      const a = new Date('2025-12-13T23:59:59.999Z');
+      const b = new Date('2025-12-14T00:00:00.000Z');
+      expect(compareDates(a, b)).toBe(-1);
+    });
+
+    test('compares across month boundary', () => {
+      const a = new Date('2025-11-30T23:59:59Z');
+      const b = new Date('2025-12-01T00:00:00Z');
+      expect(compareDates(a, b)).toBe(-1);
+    });
+
+    test('compares across year boundary', () => {
+      const a = new Date('2024-12-31T23:59:59Z');
+      const b = new Date('2025-01-01T00:00:00Z');
+      expect(compareDates(a, b)).toBe(-1);
+    });
   });
 
-  test('returns 0 when a == b', () => {
-    const a = new Date('2025-12-14T10:00:00Z');
-    const b = new Date('2025-12-14T10:00:00Z');
-    expect(compareDates(a, b)).toBe(0);
-  });
+  describe('millisecond precision', () => {
+    test('detects 1ms difference', () => {
+      const a = new Date('2025-12-14T10:00:00.000Z');
+      const b = new Date('2025-12-14T10:00:00.001Z');
+      expect(compareDates(a, b)).toBe(-1);
+    });
 
-  test('compares dates across days', () => {
-    const a = new Date('2025-12-13T23:59:59Z');
-    const b = new Date('2025-12-14T00:00:00Z');
-    expect(compareDates(a, b)).toBe(-1);
+    test('equal with same milliseconds', () => {
+      const a = new Date('2025-12-14T10:00:00.500Z');
+      const b = new Date('2025-12-14T10:00:00.500Z');
+      expect(compareDates(a, b)).toBe(0);
+    });
   });
 });
+
+// ============================================================================
+// UNIT TESTS: parseLogLine
+// ============================================================================
 
 describe('parseLogLine', () => {
-  test('parses valid JSON log line', () => {
-    const line = '{"level":"info","time":"2025-12-14T10:00:00Z","msg":"test message"}';
-    const entry = parseLogLine(line);
-    expect(entry).not.toBeNull();
-    expect(entry?.level).toBe('info');
-    expect(entry?.time).toBe('2025-12-14T10:00:00Z');
-    expect(entry?.msg).toBe('test message');
+  describe('valid JSON', () => {
+    test('parses minimal log entry', () => {
+      const line = '{"level":"info","time":"2025-12-14T10:00:00Z","msg":"test"}';
+      const entry = parseLogLine(line);
+      expect(entry).not.toBeNull();
+      expect(entry?.level).toBe('info');
+      expect(entry?.time).toBe('2025-12-14T10:00:00Z');
+      expect(entry?.msg).toBe('test');
+    });
+
+    test('parses entry with module', () => {
+      const line = '{"level":"error","time":"2025-12-14T10:00:00Z","module":"api","msg":"error"}';
+      const entry = parseLogLine(line);
+      expect(entry?.module).toBe('api');
+    });
+
+    test('parses entry with extra fields', () => {
+      const line = '{"level":"info","time":"2025-12-14T10:00:00Z","msg":"test","userId":123,"action":"login"}';
+      const entry = parseLogLine(line);
+      expect(entry?.userId).toBe(123);
+      expect(entry?.action).toBe('login');
+    });
+
+    test('handles nested objects', () => {
+      const line = '{"level":"info","time":"2025-12-14T10:00:00Z","msg":"test","meta":{"key":"value"}}';
+      const entry = parseLogLine(line);
+      expect(entry?.meta).toEqual({ key: 'value' });
+    });
   });
 
-  test('parses log line with module', () => {
-    const line = '{"level":"error","time":"2025-12-14T10:00:00Z","module":"api","msg":"error"}';
-    const entry = parseLogLine(line);
-    expect(entry?.module).toBe('api');
+  describe('non-JSON fallback', () => {
+    test('wraps plain text as raw message', () => {
+      const line = 'Plain text log message';
+      const entry = parseLogLine(line);
+      expect(entry).not.toBeNull();
+      expect(entry?.level).toBe('info');
+      expect(entry?.msg).toBe('Plain text log message');
+      expect(entry?.time).toBeDefined();
+    });
+
+    test('handles malformed JSON', () => {
+      const line = '{"level":"info", broken json';
+      const entry = parseLogLine(line);
+      expect(entry).not.toBeNull();
+      expect(entry?.msg).toBe('{"level":"info", broken json');
+    });
   });
 
-  test('wraps non-JSON lines as raw message', () => {
-    const line = 'Plain text log message';
-    const entry = parseLogLine(line);
-    expect(entry).not.toBeNull();
-    expect(entry?.level).toBe('info');
-    expect(entry?.msg).toBe('Plain text log message');
-  });
+  describe('empty/whitespace', () => {
+    test('returns null for empty string', () => {
+      expect(parseLogLine('')).toBeNull();
+    });
 
-  test('returns null for empty lines', () => {
-    expect(parseLogLine('')).toBeNull();
-    expect(parseLogLine('   ')).toBeNull();
+    test('returns null for whitespace only', () => {
+      expect(parseLogLine('   ')).toBeNull();
+      expect(parseLogLine('\t')).toBeNull();
+      expect(parseLogLine('\n')).toBeNull();
+    });
   });
 });
+
+// ============================================================================
+// UNIT TESTS: filterLog
+// ============================================================================
 
 describe('filterLog', () => {
   const baseEntry: LogEntry = {
     level: 'info',
     time: '2025-12-14T12:00:00Z',
-    msg: 'test',
+    msg: 'test message',
   };
 
-  test('passes entry with no filter', () => {
-    expect(filterLog(baseEntry, {})).toBe(true);
+  describe('no filter', () => {
+    test('passes any entry with empty filter', () => {
+      expect(filterLog(baseEntry, {})).toBe(true);
+    });
+
+    test('passes entry with undefined filter values', () => {
+      expect(filterLog(baseEntry, { level: undefined, from: undefined, to: undefined })).toBe(true);
+    });
   });
 
-  test('filters by level', () => {
-    expect(filterLog(baseEntry, { level: ['info'] })).toBe(true);
-    expect(filterLog(baseEntry, { level: ['error'] })).toBe(false);
-    expect(filterLog(baseEntry, { level: ['info', 'error'] })).toBe(true);
+  describe('level filter', () => {
+    test('matches single level', () => {
+      expect(filterLog(baseEntry, { level: ['info'] })).toBe(true);
+      expect(filterLog(baseEntry, { level: ['error'] })).toBe(false);
+    });
+
+    test('matches multiple levels', () => {
+      expect(filterLog(baseEntry, { level: ['info', 'error'] })).toBe(true);
+      expect(filterLog(baseEntry, { level: ['warn', 'error'] })).toBe(false);
+    });
+
+    test('empty level array passes all', () => {
+      expect(filterLog(baseEntry, { level: [] })).toBe(true);
+    });
+
+    test('case sensitive level matching', () => {
+      expect(filterLog(baseEntry, { level: ['INFO'] })).toBe(false);
+      expect(filterLog(baseEntry, { level: ['Info'] })).toBe(false);
+    });
   });
 
-  test('filters by from date', () => {
-    const filter: LogFilter = { from: new Date('2025-12-14T10:00:00Z') };
-    expect(filterLog(baseEntry, filter)).toBe(true);
+  describe('from filter', () => {
+    test('includes entry at exact from time', () => {
+      const filter: LogFilter = { from: new Date('2025-12-14T12:00:00Z') };
+      expect(filterLog(baseEntry, filter)).toBe(true);
+    });
 
-    const filterAfter: LogFilter = { from: new Date('2025-12-14T13:00:00Z') };
-    expect(filterLog(baseEntry, filterAfter)).toBe(false);
+    test('includes entry after from time', () => {
+      const filter: LogFilter = { from: new Date('2025-12-14T10:00:00Z') };
+      expect(filterLog(baseEntry, filter)).toBe(true);
+    });
+
+    test('excludes entry before from time', () => {
+      const filter: LogFilter = { from: new Date('2025-12-14T13:00:00Z') };
+      expect(filterLog(baseEntry, filter)).toBe(false);
+    });
+
+    test('handles from at start of day', () => {
+      const filter: LogFilter = { from: new Date('2025-12-14T00:00:00Z') };
+      expect(filterLog(baseEntry, filter)).toBe(true);
+    });
   });
 
-  test('filters by to date', () => {
-    const filter: LogFilter = { to: new Date('2025-12-14T15:00:00Z') };
-    expect(filterLog(baseEntry, filter)).toBe(true);
+  describe('to filter', () => {
+    test('includes entry at exact to time', () => {
+      const filter: LogFilter = { to: new Date('2025-12-14T12:00:00Z') };
+      expect(filterLog(baseEntry, filter)).toBe(true);
+    });
 
-    const filterBefore: LogFilter = { to: new Date('2025-12-14T10:00:00Z') };
-    expect(filterLog(baseEntry, filterBefore)).toBe(false);
+    test('includes entry before to time', () => {
+      const filter: LogFilter = { to: new Date('2025-12-14T15:00:00Z') };
+      expect(filterLog(baseEntry, filter)).toBe(true);
+    });
+
+    test('excludes entry after to time', () => {
+      const filter: LogFilter = { to: new Date('2025-12-14T10:00:00Z') };
+      expect(filterLog(baseEntry, filter)).toBe(false);
+    });
+
+    test('handles to at end of day', () => {
+      const filter: LogFilter = { to: new Date('2025-12-14T23:59:59.999Z') };
+      expect(filterLog(baseEntry, filter)).toBe(true);
+    });
   });
 
-  test('filters by date range', () => {
-    const filter: LogFilter = {
-      from: new Date('2025-12-14T10:00:00Z'),
-      to: new Date('2025-12-14T15:00:00Z'),
-    };
-    expect(filterLog(baseEntry, filter)).toBe(true);
+  describe('date range (from + to)', () => {
+    test('includes entry within range', () => {
+      const filter: LogFilter = {
+        from: new Date('2025-12-14T10:00:00Z'),
+        to: new Date('2025-12-14T15:00:00Z'),
+      };
+      expect(filterLog(baseEntry, filter)).toBe(true);
+    });
 
-    const outsideFilter: LogFilter = {
-      from: new Date('2025-12-14T13:00:00Z'),
-      to: new Date('2025-12-14T15:00:00Z'),
-    };
-    expect(filterLog(baseEntry, outsideFilter)).toBe(false);
+    test('includes entry at range boundaries', () => {
+      const filter: LogFilter = {
+        from: new Date('2025-12-14T12:00:00Z'),
+        to: new Date('2025-12-14T12:00:00Z'),
+      };
+      expect(filterLog(baseEntry, filter)).toBe(true);
+    });
+
+    test('excludes entry before range', () => {
+      const filter: LogFilter = {
+        from: new Date('2025-12-14T13:00:00Z'),
+        to: new Date('2025-12-14T15:00:00Z'),
+      };
+      expect(filterLog(baseEntry, filter)).toBe(false);
+    });
+
+    test('excludes entry after range', () => {
+      const filter: LogFilter = {
+        from: new Date('2025-12-14T08:00:00Z'),
+        to: new Date('2025-12-14T10:00:00Z'),
+      };
+      expect(filterLog(baseEntry, filter)).toBe(false);
+    });
   });
 
-  test('combines level and date filters', () => {
-    const filter: LogFilter = {
-      level: ['info'],
-      from: new Date('2025-12-14T10:00:00Z'),
-    };
-    expect(filterLog(baseEntry, filter)).toBe(true);
+  describe('combined filters', () => {
+    test('applies both level and date filters', () => {
+      const filter: LogFilter = {
+        level: ['info'],
+        from: new Date('2025-12-14T10:00:00Z'),
+        to: new Date('2025-12-14T15:00:00Z'),
+      };
+      expect(filterLog(baseEntry, filter)).toBe(true);
+    });
 
-    const noMatchFilter: LogFilter = {
-      level: ['error'],
-      from: new Date('2025-12-14T10:00:00Z'),
-    };
-    expect(filterLog(baseEntry, noMatchFilter)).toBe(false);
+    test('fails if level doesnt match but date does', () => {
+      const filter: LogFilter = {
+        level: ['error'],
+        from: new Date('2025-12-14T10:00:00Z'),
+      };
+      expect(filterLog(baseEntry, filter)).toBe(false);
+    });
+
+    test('fails if date doesnt match but level does', () => {
+      const filter: LogFilter = {
+        level: ['info'],
+        from: new Date('2025-12-14T15:00:00Z'),
+      };
+      expect(filterLog(baseEntry, filter)).toBe(false);
+    });
+  });
+
+  describe('invalid entry time', () => {
+    test('rejects entry with invalid time when date filter present', () => {
+      const invalidEntry: LogEntry = { level: 'info', time: 'invalid', msg: 'test' };
+      const filter: LogFilter = { from: new Date('2025-12-14T00:00:00Z') };
+      expect(filterLog(invalidEntry, filter)).toBe(false);
+    });
+
+    test('passes entry with invalid time when no date filter', () => {
+      const invalidEntry: LogEntry = { level: 'info', time: 'invalid', msg: 'test' };
+      expect(filterLog(invalidEntry, {})).toBe(true);
+    });
   });
 });
 
-describe('findOffsetForDate (binary search)', () => {
+// ============================================================================
+// INTEGRATION TESTS: findOffsetForDate (Binary Search)
+// ============================================================================
+
+describe('findOffsetForDate', () => {
   const testDir = join(import.meta.dir, '__test_logs__');
-  const testLogFile = join(testDir, 'test.log');
-
-  // Generate test log file with entries spanning multiple days
-  function generateTestLogs(): string {
-    const lines: string[] = [];
-    const dates = [
-      // Dec 12 - early entries
-      '2025-12-12T08:00:00.000Z',
-      '2025-12-12T12:00:00.000Z',
-      '2025-12-12T18:00:00.000Z',
-      // Dec 13
-      '2025-12-13T06:00:00.000Z',
-      '2025-12-13T12:00:00.000Z',
-      '2025-12-13T20:00:00.000Z',
-      // Dec 14 - target date
-      '2025-12-14T00:00:01.000Z',
-      '2025-12-14T08:00:00.000Z',
-      '2025-12-14T12:00:00.000Z',
-      '2025-12-14T18:00:00.000Z',
-      // Dec 15
-      '2025-12-15T06:00:00.000Z',
-      '2025-12-15T12:00:00.000Z',
-      // Dec 16
-      '2025-12-16T10:00:00.000Z',
-    ];
-
-    for (const time of dates) {
-      lines.push(JSON.stringify({
-        level: 'info',
-        time,
-        module: 'test',
-        msg: `Log entry at ${time}`,
-      }));
-    }
-
-    return lines.join('\n') + '\n';
-  }
 
   beforeAll(() => {
     mkdirSync(testDir, { recursive: true });
-    writeFileSync(testLogFile, generateTestLogs());
   });
 
   afterAll(() => {
     rmSync(testDir, { recursive: true, force: true });
   });
 
-  test('finds offset for date in middle of file', async () => {
-    const file = Bun.file(testLogFile);
-    const stat = await file.stat();
-    const fileSize = stat?.size || 0;
-
-    // Search for Dec 14
-    const targetDate = new Date('2025-12-14T00:00:00.000Z');
-    const { offset, firstLine } = await findOffsetForDate(file, targetDate, fileSize);
-
-    expect(offset).toBeGreaterThan(0);
-    expect(firstLine).toContain('2025-12-14');
-
-    // Verify the found line is actually >= target date
-    const entry = parseLogLine(firstLine);
-    expect(entry).not.toBeNull();
-    const entryDate = parseLogDate(entry!.time);
-    expect(entryDate).not.toBeNull();
-    expect(compareDates(entryDate!, targetDate)).toBeGreaterThanOrEqual(0);
-  });
-
-  test('finds offset for date at start of file', async () => {
-    const file = Bun.file(testLogFile);
-    const stat = await file.stat();
-    const fileSize = stat?.size || 0;
-
-    // Search for date before all entries
-    const targetDate = new Date('2025-12-01T00:00:00.000Z');
-    const { offset } = await findOffsetForDate(file, targetDate, fileSize);
-
-    // Should return offset 0 (start of file)
-    expect(offset).toBe(0);
-  });
-
-  test('finds offset for date at end of file', async () => {
-    const file = Bun.file(testLogFile);
-    const stat = await file.stat();
-    const fileSize = stat?.size || 0;
-
-    // Search for Dec 16
-    const targetDate = new Date('2025-12-16T00:00:00.000Z');
-    const { offset, firstLine } = await findOffsetForDate(file, targetDate, fileSize);
-
-    expect(firstLine).toContain('2025-12-16');
-  });
-
-  test('handles exact timestamp match', async () => {
-    const file = Bun.file(testLogFile);
-    const stat = await file.stat();
-    const fileSize = stat?.size || 0;
-
-    // Search for exact timestamp
-    const targetDate = new Date('2025-12-14T08:00:00.000Z');
-    const { firstLine } = await findOffsetForDate(file, targetDate, fileSize);
-
-    const entry = parseLogLine(firstLine);
-    const entryDate = parseLogDate(entry!.time);
-    expect(compareDates(entryDate!, targetDate)).toBeGreaterThanOrEqual(0);
-  });
-
-  test('returns correct offset for reading', async () => {
-    const file = Bun.file(testLogFile);
-    const stat = await file.stat();
-    const fileSize = stat?.size || 0;
-
-    const targetDate = new Date('2025-12-14T00:00:00.000Z');
-    const { offset } = await findOffsetForDate(file, targetDate, fileSize);
-
-    // Read from offset and verify first line
-    const content = await file.slice(offset, offset + 200).text();
-    const firstLine = content.split('\n')[0];
-    const entry = parseLogLine(firstLine);
-
-    expect(entry).not.toBeNull();
-    expect(entry!.time).toContain('2025-12-14');
-  });
-});
-
-describe('findOffsetForDate with large file', () => {
-  const testDir = join(import.meta.dir, '__test_logs_large__');
-  const testLogFile = join(testDir, 'large.log');
-
-  // Generate larger test file (> 1MB to trigger binary search)
-  function generateLargeLogs(): string {
-    const lines: string[] = [];
-    const startDate = new Date('2025-12-01T00:00:00.000Z');
-
-    // Generate ~10000 entries over 15 days
-    for (let i = 0; i < 10000; i++) {
-      const time = new Date(startDate.getTime() + i * 120000); // Every 2 minutes
-      lines.push(JSON.stringify({
-        level: i % 10 === 0 ? 'error' : i % 3 === 0 ? 'warn' : 'info',
-        time: time.toISOString(),
-        module: 'test',
-        msg: `Log entry ${i}: ${'x'.repeat(50)}`, // Pad to make file larger
-      }));
-    }
-
-    return lines.join('\n') + '\n';
+  // Helper to create log entry
+  function logEntry(time: string, msg = 'test'): string {
+    return JSON.stringify({ level: 'info', time, module: 'test', msg });
   }
 
-  beforeAll(() => {
-    mkdirSync(testDir, { recursive: true });
-    writeFileSync(testLogFile, generateLargeLogs());
-  });
-
-  afterAll(() => {
-    rmSync(testDir, { recursive: true, force: true });
-  });
-
-  test('binary search finds correct offset in large file', async () => {
-    const file = Bun.file(testLogFile);
+  // Helper to create test file and return Bun.file reference
+  async function createTestFile(name: string, content: string) {
+    const path = join(testDir, name);
+    writeFileSync(path, content);
+    const file = Bun.file(path);
     const stat = await file.stat();
-    const fileSize = stat?.size || 0;
+    return { file, size: stat?.size || 0, path };
+  }
 
-    // File should be > 1MB
-    expect(fileSize).toBeGreaterThan(1024 * 1024);
+  describe('small files (linear scan only)', () => {
+    test('finds entry in small file', async () => {
+      const content = [
+        logEntry('2025-12-12T10:00:00Z'),
+        logEntry('2025-12-13T10:00:00Z'),
+        logEntry('2025-12-14T10:00:00Z'),
+        logEntry('2025-12-15T10:00:00Z'),
+      ].join('\n') + '\n';
 
-    // Search for date in middle
-    const targetDate = new Date('2025-12-08T00:00:00.000Z');
-    const { offset, firstLine } = await findOffsetForDate(file, targetDate, fileSize);
+      const { file, size } = await createTestFile('small.log', content);
+      const target = new Date('2025-12-14T00:00:00Z');
+      const { offset, firstLine } = await findOffsetForDate(file, target, size);
 
-    expect(offset).toBeGreaterThan(0);
+      const entry = parseLogLine(firstLine);
+      expect(entry?.time).toBe('2025-12-14T10:00:00Z');
+    });
 
-    const entry = parseLogLine(firstLine);
-    expect(entry).not.toBeNull();
+    test('returns offset 0 when target is before all entries', async () => {
+      const content = [
+        logEntry('2025-12-14T10:00:00Z'),
+        logEntry('2025-12-15T10:00:00Z'),
+      ].join('\n') + '\n';
 
-    const entryDate = parseLogDate(entry!.time);
-    expect(entryDate).not.toBeNull();
-    expect(compareDates(entryDate!, targetDate)).toBeGreaterThanOrEqual(0);
+      const { file, size } = await createTestFile('before_all.log', content);
+      const target = new Date('2025-12-01T00:00:00Z');
+      const { offset, firstLine } = await findOffsetForDate(file, target, size);
 
-    // Entry should be on or after Dec 8
-    expect(entryDate!.getUTCDate()).toBeGreaterThanOrEqual(8);
+      expect(offset).toBe(0);
+      const entry = parseLogLine(firstLine);
+      expect(entry?.time).toBe('2025-12-14T10:00:00Z');
+    });
+
+    test('returns last valid position when target is after all entries', async () => {
+      const content = [
+        logEntry('2025-12-12T10:00:00Z'),
+        logEntry('2025-12-13T10:00:00Z'),
+      ].join('\n') + '\n';
+
+      const { file, size } = await createTestFile('after_all.log', content);
+      const target = new Date('2025-12-20T00:00:00Z');
+      const { firstLine } = await findOffsetForDate(file, target, size);
+
+      // Should return empty or no match since all entries are before target
+      expect(firstLine).toBe('');
+    });
+
+    test('handles single entry file', async () => {
+      const content = logEntry('2025-12-14T10:00:00Z') + '\n';
+
+      const { file, size } = await createTestFile('single.log', content);
+      const target = new Date('2025-12-14T00:00:00Z');
+      const { offset, firstLine } = await findOffsetForDate(file, target, size);
+
+      expect(offset).toBe(0);
+      const entry = parseLogLine(firstLine);
+      expect(entry?.time).toBe('2025-12-14T10:00:00Z');
+    });
+
+    test('handles empty file', async () => {
+      const { file, size } = await createTestFile('empty.log', '');
+      const target = new Date('2025-12-14T00:00:00Z');
+      const { firstLine } = await findOffsetForDate(file, target, size);
+
+      expect(firstLine).toBe('');
+    });
   });
 
-  test('binary search is efficient (limited iterations)', async () => {
-    const file = Bun.file(testLogFile);
-    const stat = await file.stat();
-    const fileSize = stat?.size || 0;
+  describe('medium files (forces some binary search iterations)', () => {
+    // Create file > 65KB to trigger binary search
+    function generateMediumLogs(entryCount: number, startDate: Date, intervalMs: number): string {
+      const lines: string[] = [];
+      for (let i = 0; i < entryCount; i++) {
+        const time = new Date(startDate.getTime() + i * intervalMs);
+        // Pad message to make file larger
+        lines.push(logEntry(time.toISOString(), `Entry ${i} ${'x'.repeat(100)}`));
+      }
+      return lines.join('\n') + '\n';
+    }
 
-    // For a file with 10000 entries, binary search should complete in ~15-20 iterations max
-    // This is implicitly tested by the function completing quickly
-    const startTime = performance.now();
+    test('finds target date in middle of file', async () => {
+      // Generate ~500 entries, each ~150 bytes = ~75KB
+      const startDate = new Date('2025-12-01T00:00:00Z');
+      const content = generateMediumLogs(500, startDate, 3600000); // 1 hour intervals
 
-    const targetDate = new Date('2025-12-10T12:00:00.000Z');
-    await findOffsetForDate(file, targetDate, fileSize);
+      const { file, size } = await createTestFile('medium_middle.log', content);
+      expect(size).toBeGreaterThan(65536);
 
-    const elapsed = performance.now() - startTime;
+      // Target: Dec 10 (entry ~216)
+      const target = new Date('2025-12-10T00:00:00Z');
+      const { firstLine } = await findOffsetForDate(file, target, size);
 
-    // Should complete in under 100ms for local file
-    expect(elapsed).toBeLessThan(100);
+      const entry = parseLogLine(firstLine);
+      const entryDate = parseLogDate(entry!.time);
+      expect(compareDates(entryDate!, target)).toBeGreaterThanOrEqual(0);
+      expect(entryDate!.getUTCDate()).toBe(10);
+    });
+
+    test('finds target date near start of file', async () => {
+      const startDate = new Date('2025-12-01T00:00:00Z');
+      const content = generateMediumLogs(500, startDate, 3600000);
+
+      const { file, size } = await createTestFile('medium_start.log', content);
+
+      // Target: Dec 2 (near start)
+      const target = new Date('2025-12-02T00:00:00Z');
+      const { firstLine } = await findOffsetForDate(file, target, size);
+
+      const entry = parseLogLine(firstLine);
+      const entryDate = parseLogDate(entry!.time);
+      expect(compareDates(entryDate!, target)).toBeGreaterThanOrEqual(0);
+    });
+
+    test('finds target date near end of file', async () => {
+      const startDate = new Date('2025-12-01T00:00:00Z');
+      const content = generateMediumLogs(500, startDate, 3600000);
+
+      const { file, size } = await createTestFile('medium_end.log', content);
+
+      // Target: Dec 20 (near end)
+      const target = new Date('2025-12-20T00:00:00Z');
+      const { firstLine } = await findOffsetForDate(file, target, size);
+
+      const entry = parseLogLine(firstLine);
+      const entryDate = parseLogDate(entry!.time);
+      expect(compareDates(entryDate!, target)).toBeGreaterThanOrEqual(0);
+    });
+  });
+
+  describe('large files (real binary search)', () => {
+    // Generate file > 1MB with many entries
+    function generateLargeLogs(): string {
+      const lines: string[] = [];
+      const startDate = new Date('2025-12-01T00:00:00Z');
+
+      // 10000 entries * ~150 bytes = ~1.5MB
+      for (let i = 0; i < 10000; i++) {
+        const time = new Date(startDate.getTime() + i * 120000); // 2 min intervals
+        lines.push(logEntry(time.toISOString(), `Log entry ${i}: ${'x'.repeat(100)}`));
+      }
+      return lines.join('\n') + '\n';
+    }
+
+    test('binary search correctly finds date in large file', async () => {
+      const content = generateLargeLogs();
+      const { file, size } = await createTestFile('large.log', content);
+
+      expect(size).toBeGreaterThan(1024 * 1024);
+
+      // Target: Dec 8 (middle of file)
+      const target = new Date('2025-12-08T00:00:00Z');
+      const { firstLine } = await findOffsetForDate(file, target, size);
+
+      const entry = parseLogLine(firstLine);
+      expect(entry).not.toBeNull();
+
+      const entryDate = parseLogDate(entry!.time);
+      expect(entryDate).not.toBeNull();
+
+      // Must be >= target
+      expect(compareDates(entryDate!, target)).toBeGreaterThanOrEqual(0);
+
+      // Should be Dec 8 (not Dec 9 or later)
+      expect(entryDate!.getUTCDate()).toBe(8);
+    });
+
+    test('binary search efficient - limited iterations', async () => {
+      const content = generateLargeLogs();
+      const { file, size } = await createTestFile('large_perf.log', content);
+
+      const startTime = performance.now();
+      const target = new Date('2025-12-10T12:00:00Z');
+      await findOffsetForDate(file, target, size);
+      const elapsed = performance.now() - startTime;
+
+      // Should complete in under 50ms for local file
+      expect(elapsed).toBeLessThan(50);
+    });
+
+    test('multiple searches return consistent results', async () => {
+      const content = generateLargeLogs();
+      const { file, size } = await createTestFile('large_consistent.log', content);
+
+      const target = new Date('2025-12-07T06:00:00Z');
+
+      // Run same search 3 times
+      const results = await Promise.all([
+        findOffsetForDate(file, target, size),
+        findOffsetForDate(file, target, size),
+        findOffsetForDate(file, target, size),
+      ]);
+
+      // All should return same offset
+      expect(results[0].offset).toBe(results[1].offset);
+      expect(results[1].offset).toBe(results[2].offset);
+    });
+  });
+
+  describe('edge cases and boundary conditions', () => {
+    test('exact timestamp match', async () => {
+      const content = [
+        logEntry('2025-12-14T08:00:00.000Z'),
+        logEntry('2025-12-14T09:00:00.000Z'),
+        logEntry('2025-12-14T10:00:00.000Z'),
+      ].join('\n') + '\n';
+
+      const { file, size } = await createTestFile('exact_match.log', content);
+      const target = new Date('2025-12-14T09:00:00.000Z');
+      const { firstLine } = await findOffsetForDate(file, target, size);
+
+      const entry = parseLogLine(firstLine);
+      expect(entry?.time).toBe('2025-12-14T09:00:00.000Z');
+    });
+
+    test('target between two entries', async () => {
+      const content = [
+        logEntry('2025-12-14T08:00:00Z'),
+        logEntry('2025-12-14T10:00:00Z'),
+      ].join('\n') + '\n';
+
+      const { file, size } = await createTestFile('between.log', content);
+      // Target is 09:00, between 08:00 and 10:00
+      const target = new Date('2025-12-14T09:00:00Z');
+      const { firstLine } = await findOffsetForDate(file, target, size);
+
+      const entry = parseLogLine(firstLine);
+      // Should return 10:00 (first entry >= target)
+      expect(entry?.time).toBe('2025-12-14T10:00:00Z');
+    });
+
+    test('handles entries with same timestamp', async () => {
+      const content = [
+        logEntry('2025-12-14T10:00:00Z', 'first'),
+        logEntry('2025-12-14T10:00:00Z', 'second'),
+        logEntry('2025-12-14T10:00:00Z', 'third'),
+      ].join('\n') + '\n';
+
+      const { file, size } = await createTestFile('same_time.log', content);
+      const target = new Date('2025-12-14T10:00:00Z');
+      const { offset } = await findOffsetForDate(file, target, size);
+
+      // Should return first occurrence
+      expect(offset).toBe(0);
+    });
+
+    test('handles very long log lines', async () => {
+      const longMsg = 'x'.repeat(5000);
+      const content = [
+        logEntry('2025-12-13T10:00:00Z', longMsg),
+        logEntry('2025-12-14T10:00:00Z', longMsg),
+        logEntry('2025-12-15T10:00:00Z', longMsg),
+      ].join('\n') + '\n';
+
+      const { file, size } = await createTestFile('long_lines.log', content);
+      const target = new Date('2025-12-14T00:00:00Z');
+      const { firstLine } = await findOffsetForDate(file, target, size);
+
+      const entry = parseLogLine(firstLine);
+      expect(entry?.time).toBe('2025-12-14T10:00:00Z');
+    });
+
+    test('handles non-JSON lines mixed with JSON', async () => {
+      const content = [
+        'Some non-JSON header line',
+        logEntry('2025-12-13T10:00:00Z'),
+        '--- separator ---',
+        logEntry('2025-12-14T10:00:00Z'),
+        'Another text line',
+        logEntry('2025-12-15T10:00:00Z'),
+      ].join('\n') + '\n';
+
+      const { file, size } = await createTestFile('mixed.log', content);
+      const target = new Date('2025-12-14T00:00:00Z');
+      const { firstLine } = await findOffsetForDate(file, target, size);
+
+      const entry = parseLogLine(firstLine);
+      expect(entry?.time).toBe('2025-12-14T10:00:00Z');
+    });
+  });
+
+  describe('realistic scenarios', () => {
+    test('simulates daily log rotation - find today in week of logs', async () => {
+      const lines: string[] = [];
+      // Dec 10-16, ~100 entries per day
+      for (let day = 10; day <= 16; day++) {
+        for (let hour = 0; hour < 24; hour += 4) {
+          for (let min = 0; min < 60; min += 15) {
+            const time = `2025-12-${day.toString().padStart(2, '0')}T${hour.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}:00Z`;
+            lines.push(logEntry(time, `Entry for ${time}`));
+          }
+        }
+      }
+      const content = lines.join('\n') + '\n';
+
+      const { file, size } = await createTestFile('weekly.log', content);
+
+      // Find Dec 14 entries
+      const target = new Date('2025-12-14T00:00:00Z');
+      const { firstLine } = await findOffsetForDate(file, target, size);
+
+      const entry = parseLogLine(firstLine);
+      const entryDate = parseLogDate(entry!.time);
+
+      expect(entryDate!.getUTCDate()).toBe(14);
+      expect(entryDate!.getUTCHours()).toBe(0);
+      expect(entryDate!.getUTCMinutes()).toBe(0);
+    });
+
+    test('handles gaps in log timestamps', async () => {
+      const content = [
+        logEntry('2025-12-10T10:00:00Z'),
+        logEntry('2025-12-10T11:00:00Z'),
+        // Gap: Dec 11-13 missing
+        logEntry('2025-12-14T08:00:00Z'),
+        logEntry('2025-12-14T09:00:00Z'),
+      ].join('\n') + '\n';
+
+      const { file, size } = await createTestFile('gaps.log', content);
+
+      // Search for Dec 12 (doesn't exist)
+      const target = new Date('2025-12-12T00:00:00Z');
+      const { firstLine } = await findOffsetForDate(file, target, size);
+
+      const entry = parseLogLine(firstLine);
+      // Should return first entry >= Dec 12, which is Dec 14
+      expect(entry?.time).toBe('2025-12-14T08:00:00Z');
+    });
+
+    test('burst of logs at same second', async () => {
+      const lines: string[] = [];
+      // 100 logs at same second
+      for (let i = 0; i < 100; i++) {
+        lines.push(logEntry(`2025-12-14T10:00:00.${i.toString().padStart(3, '0')}Z`, `Burst ${i}`));
+      }
+      const content = lines.join('\n') + '\n';
+
+      const { file, size } = await createTestFile('burst.log', content);
+      const target = new Date('2025-12-14T10:00:00.050Z');
+      const { firstLine } = await findOffsetForDate(file, target, size);
+
+      const entry = parseLogLine(firstLine);
+      const entryDate = parseLogDate(entry!.time);
+      expect(compareDates(entryDate!, target)).toBeGreaterThanOrEqual(0);
+    });
+  });
+
+  describe('regression tests', () => {
+    // This test would have caught the original bug
+    test('REGRESSION: large file with target date in first half', async () => {
+      const lines: string[] = [];
+      // Generate 5000 entries over 10 days (Dec 6-15)
+      // Each day ~500 entries
+      for (let i = 0; i < 5000; i++) {
+        const dayOffset = Math.floor(i / 500);
+        const hourOffset = (i % 500) * 0.048; // ~48 entries per hour
+        const date = new Date('2025-12-06T00:00:00Z');
+        date.setUTCDate(date.getUTCDate() + dayOffset);
+        date.setUTCHours(Math.floor(hourOffset));
+        date.setUTCMinutes(Math.floor((hourOffset % 1) * 60));
+
+        lines.push(logEntry(date.toISOString(), `Entry ${i}: ${'x'.repeat(80)}`));
+      }
+      const content = lines.join('\n') + '\n';
+
+      const { file, size } = await createTestFile('regression_first_half.log', content);
+      expect(size).toBeGreaterThan(65536);
+
+      // Target: Dec 8 - in first third of file
+      const target = new Date('2025-12-08T00:00:00Z');
+      const { firstLine } = await findOffsetForDate(file, target, size);
+
+      const entry = parseLogLine(firstLine);
+      const entryDate = parseLogDate(entry!.time);
+
+      // CRITICAL: Must find Dec 8, not a later date
+      expect(entryDate!.getUTCDate()).toBe(8);
+      expect(compareDates(entryDate!, target)).toBeGreaterThanOrEqual(0);
+    });
+
+    test('REGRESSION: returns correct offset for sequential reads', async () => {
+      const lines: string[] = [];
+      for (let i = 0; i < 1000; i++) {
+        const time = new Date('2025-12-01T00:00:00Z');
+        time.setUTCHours(Math.floor(i / 60));
+        time.setUTCMinutes(i % 60);
+        lines.push(logEntry(time.toISOString(), `Entry ${i}`));
+      }
+      const content = lines.join('\n') + '\n';
+
+      const { file, size } = await createTestFile('regression_offset.log', content);
+
+      const target = new Date('2025-12-01T05:30:00Z');
+      const { offset } = await findOffsetForDate(file, target, size);
+
+      // Read from offset and verify
+      const readContent = await file.slice(offset, offset + 500).text();
+      const firstLine = readContent.split('\n')[0];
+      const entry = parseLogLine(firstLine);
+      const entryDate = parseLogDate(entry!.time);
+
+      // Entry at offset should be >= target
+      expect(compareDates(entryDate!, target)).toBeGreaterThanOrEqual(0);
+
+      // And should be close to target (within ~1 hour)
+      const diffMs = entryDate!.getTime() - target.getTime();
+      expect(diffMs).toBeLessThan(3600000); // Less than 1 hour difference
+    });
   });
 });
