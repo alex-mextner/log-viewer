@@ -84,7 +84,41 @@ export async function findOffsetForDate(file: ReturnType<typeof Bun.file>, targe
     const newlinePos = chunk.indexOf('\n');
 
     if (newlinePos === -1) {
-      high = mid;
+      // No newline in chunk - either very long line, end of file, or binary data
+      // Try reading a larger chunk to find newline
+      const largerChunkSize = Math.min(65536, fileSize - mid); // 64KB
+      if (largerChunkSize > chunkSize) {
+        const largerChunk = await file.slice(mid, mid + largerChunkSize).text();
+        const largerNewlinePos = largerChunk.indexOf('\n');
+        if (largerNewlinePos !== -1) {
+          // Found newline in larger chunk - continue with this data
+          const restOfLargerChunk = largerChunk.slice(largerNewlinePos + 1);
+          const nextNewlineInLarger = restOfLargerChunk.indexOf('\n');
+          const lineFromLarger = nextNewlineInLarger === -1 ? restOfLargerChunk : restOfLargerChunk.slice(0, nextNewlineInLarger);
+
+          if (lineFromLarger.trim()) {
+            const entryFromLarger = parseLogLineStrict(lineFromLarger);
+            if (entryFromLarger) {
+              const dateFromLarger = parseLogDate(entryFromLarger.time);
+              if (dateFromLarger) {
+                const cmpLarger = compareDates(dateFromLarger, targetDate);
+                if (cmpLarger < 0) {
+                  const newLow = mid + largerNewlinePos + 1 + lineFromLarger.length + 1;
+                  console.log(`[bs#${iterations}] mid=${mid}, found in 64KB: ${entryFromLarger.time} < target, low=${newLow}`);
+                  low = newLow;
+                } else {
+                  console.log(`[bs#${iterations}] mid=${mid}, found in 64KB: ${entryFromLarger.time} >= target, high=${mid}`);
+                  high = mid;
+                }
+                continue;
+              }
+            }
+          }
+        }
+      }
+      // Still no newline or valid entry - move forward
+      console.log(`[bs#${iterations}] mid=${mid}, no newline even in 64KB, low=${mid + largerChunkSize}`);
+      low = mid + largerChunkSize;
       continue;
     }
 
@@ -94,7 +128,7 @@ export async function findOffsetForDate(file: ReturnType<typeof Bun.file>, targe
     const line = nextNewline === -1 ? restOfChunk : restOfChunk.slice(0, nextNewline);
 
     if (!line.trim()) {
-      // Empty line, try going left
+      console.log(`[bs#${iterations}] mid=${mid}, empty line, high=${mid}`);
       high = mid;
       continue;
     }
@@ -102,8 +136,39 @@ export async function findOffsetForDate(file: ReturnType<typeof Bun.file>, targe
     // Use strict parsing - ignore non-JSON or lines without valid timestamp
     const entry = parseLogLineStrict(line);
     if (!entry) {
-      // Can't determine date, try left half
-      high = mid;
+      // Non-JSON line - try to find next JSON line in chunk
+      // Don't retreat (high=mid) as this could skip valid entries after non-JSON zone
+      const remainingChunk = chunk.slice(newlinePos + 1);
+      let foundJson = false;
+      let searchOffset = mid + newlinePos + 1;
+
+      for (const searchLine of remainingChunk.split('\n').slice(1)) {
+        searchOffset += searchLine.length + 1;
+        if (!searchLine.trim()) continue;
+        const searchEntry = parseLogLineStrict(searchLine);
+        if (searchEntry) {
+          // Found JSON - use it for comparison
+          const searchDate = parseLogDate(searchEntry.time);
+          if (searchDate) {
+            const searchCmp = compareDates(searchDate, targetDate);
+            if (searchCmp < 0) {
+              console.log(`[bs#${iterations}] mid=${mid}, found JSON after non-JSON: ${searchEntry.time} < target, low=${searchOffset}`);
+              low = searchOffset;
+            } else {
+              console.log(`[bs#${iterations}] mid=${mid}, found JSON after non-JSON: ${searchEntry.time} >= target, high=${mid}`);
+              high = mid;
+            }
+            foundJson = true;
+            break;
+          }
+        }
+      }
+
+      if (!foundJson) {
+        // No JSON found in chunk - move past this region
+        console.log(`[bs#${iterations}] mid=${mid}, no JSON in chunk, low=${mid + chunkSize}`);
+        low = mid + chunkSize;
+      }
       continue;
     }
 
@@ -113,22 +178,27 @@ export async function findOffsetForDate(file: ReturnType<typeof Bun.file>, targe
 
     if (cmp < 0) {
       // Entry is before target, search in right half
-      // Move low past this line
-      low = mid + newlinePos + 1;
+      const newLow = mid + newlinePos + 1;
+      console.log(`[bs#${iterations}] mid=${mid}, entry=${entry.time} < target, low=${newLow}`);
+      low = newLow;
     } else {
       // Entry is >= target, search in left half
-      // Keep mid in range so we don't skip past the answer
+      console.log(`[bs#${iterations}] mid=${mid}, entry=${entry.time} >= target, high=${mid}`);
       high = mid;
     }
   }
 
   // Linear scan from 'low' to find exact first entry >= targetDate
-  const scanChunk = await file.slice(low, Math.min(low + 65536 * 2, fileSize)).text();
+  // Use larger chunk to ensure we find the entry
+  const scanSize = Math.min(65536 * 4, fileSize - low); // 256KB
+  const scanChunk = await file.slice(low, low + scanSize).text();
   const lines = scanChunk.split('\n');
 
   let bestOffset = low;
   let bestLine = '';
   let offset = low;
+  let scannedCount = 0;
+  let foundAnyEntry = false;
 
   // If low > 0, first "line" is likely a partial line (tail of previous line)
   // Skip it and adjust offset
@@ -143,9 +213,11 @@ export async function findOffsetForDate(file: ReturnType<typeof Bun.file>, targe
       offset += (line?.length ?? 0) + 1;
       continue;
     }
+    scannedCount++;
     // Use strict parsing - only consider lines with valid JSON timestamp
     const entry = parseLogLineStrict(line);
     if (entry) {
+      foundAnyEntry = true;
       const entryDate = parseLogDate(entry.time);
       if (entryDate && compareDates(entryDate, targetDate) >= 0) {
         bestOffset = offset;
@@ -154,6 +226,10 @@ export async function findOffsetForDate(file: ReturnType<typeof Bun.file>, targe
       }
     }
     offset += line.length + 1;
+  }
+
+  if (!bestLine) {
+    console.log(`[binarySearch] linear scan: ${scannedCount} lines, foundAnyEntry=${foundAnyEntry}, no match >= target`);
   }
 
   const foundEntry = parseLogLine(bestLine);

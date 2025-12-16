@@ -775,6 +775,258 @@ describe('findOffsetForDate', () => {
   });
 
   describe('regression tests', () => {
+    // Test with REAL 612MB log file
+    test('REAL FILE: binary search on 612MB log file', async () => {
+      const realLogPath = '/Users/ultra/Downloads/psy_froggy_bot-out.log';
+      const file = Bun.file(realLogPath);
+
+      if (!(await file.exists())) {
+        console.log('Skipping real file test - file not found');
+        return;
+      }
+
+      const stat = await file.stat();
+      const size = stat?.size || 0;
+      console.log(`Real file: ${(size / 1024 / 1024).toFixed(1)}MB`);
+
+      // Target: today 00:00 UTC
+      const target = new Date('2025-12-16T00:00:00.000Z');
+      const t0 = performance.now();
+      const { firstLine, offset } = await findOffsetForDate(file, target, size);
+      const elapsed = performance.now() - t0;
+
+      console.log(`Binary search: ${elapsed.toFixed(1)}ms, offset=${offset}`);
+
+      const entry = parseLogLine(firstLine);
+      expect(entry).not.toBeNull();
+
+      const entryDate = parseLogDate(entry!.time);
+      expect(entryDate).not.toBeNull();
+
+      // Should find entry on Dec 16
+      expect(entryDate!.getUTCDate()).toBe(16);
+      expect(entryDate!.getUTCMonth()).toBe(11); // December
+
+      // Should be fast (< 100ms for binary search)
+      expect(elapsed).toBeLessThan(100);
+    });
+
+    // BUG: Non-JSON lines (stack traces, separator) cause binary search to retreat to high=mid
+    // This can leave linear scan starting before a large gap
+    test('REGRESSION: non-JSON gap > 256KB causes found=none', async () => {
+      const lines: string[] = [];
+
+      // Dec 1-14: normal JSON entries
+      for (let day = 1; day <= 14; day++) {
+        for (let hour = 0; hour < 24; hour++) {
+          const hh = hour.toString().padStart(2, '0');
+          const dd = day.toString().padStart(2, '0');
+          lines.push(logEntry(`2025-12-${dd}T${hh}:00:00.000Z`, `Day${dd}_${hh}: ${'x'.repeat(100)}`));
+        }
+      }
+
+      // Dec 15 end: a few entries then HUGE non-JSON gap (stack traces, separator lines)
+      for (let hour = 0; hour < 12; hour++) {
+        const hh = hour.toString().padStart(2, '0');
+        lines.push(logEntry(`2025-12-15T${hh}:00:00.000Z`, `Day15_${hh}: ${'x'.repeat(100)}`));
+      }
+
+      // 400KB of non-JSON lines (simulating stack trace dump or corrupt data)
+      for (let i = 0; i < 3000; i++) {
+        // ~130 bytes each * 3000 = ~390KB of non-JSON
+        lines.push(`--- Stack trace line ${i.toString().padStart(4, '0')}: ${'ERROR '.repeat(15)} ---`);
+      }
+
+      // Dec 16: starts after the non-JSON gap
+      for (let hour = 5; hour < 24; hour++) {
+        const hh = hour.toString().padStart(2, '0');
+        lines.push(logEntry(`2025-12-16T${hh}:00:00.000Z`, `Day16_${hh}: ${'x'.repeat(100)}`));
+      }
+
+      const content = lines.join('\n') + '\n';
+      const { file, size } = await createTestFile('regression_nonjson_gap.log', content);
+
+      // Target: Dec 15 23:00 UTC
+      // Binary search might land in non-JSON zone and retreat to Dec 15 12:00 area
+      // Linear scan 256KB won't reach Dec 16 if gap is > 256KB
+      const target = new Date('2025-12-15T23:00:00.000Z');
+      const { firstLine } = await findOffsetForDate(file, target, size);
+
+      const entry = parseLogLine(firstLine);
+      // BUG: If firstLine is empty, we return "found: none"
+      expect(entry).not.toBeNull();
+
+      const entryDate = parseLogDate(entry!.time);
+      expect(entryDate).not.toBeNull();
+
+      // Must find Dec 16 05:00
+      expect(compareDates(entryDate!, target)).toBeGreaterThanOrEqual(0);
+      expect(entryDate!.getUTCDate()).toBe(16);
+    });
+
+    // BUG: Binary search finds position, but gap to first entry >= target is > 256KB linear scan
+    // This causes "found: none" because linear scan doesn't reach the target entry
+    test('REGRESSION: large gap > 256KB between last entry < target and first entry >= target', async () => {
+      const lines: string[] = [];
+
+      // Create file where:
+      // 1. Many entries for Dec 1-14 (all < target)
+      // 2. MANY entries at Dec 15 20:30 (> 256KB worth, all still < target)
+      // 3. Few entries at Dec 16 05:00 (first >= target)
+      // Binary search should land in Dec 15 zone, 256KB scan won't reach Dec 16
+
+      // Dec 1-14: one entry per hour
+      for (let day = 1; day <= 14; day++) {
+        for (let hour = 0; hour < 24; hour++) {
+          const hh = hour.toString().padStart(2, '0');
+          const dd = day.toString().padStart(2, '0');
+          lines.push(logEntry(`2025-12-${dd}T${hh}:00:00.000Z`, `Day${dd}_${hh}: ${'x'.repeat(100)}`));
+        }
+      }
+
+      // Dec 15: HUGE number of entries at 20:30 (making >600KB of entries all at same timestamp)
+      // This simulates a burst of activity before shutdown
+      // Binary search will land somewhere in the middle, leaving >256KB to scan
+      for (let i = 0; i < 4000; i++) {
+        // ~160 bytes each * 4000 = ~640KB all at Dec 15 20:30
+        lines.push(logEntry(`2025-12-15T20:30:00.${i.toString().padStart(4, '0')}Z`, `Dec15_burst_${i.toString().padStart(4, '0')}: ${'y'.repeat(100)}`));
+      }
+
+      // GAP: No entries between Dec 15 20:30.999 and Dec 16 05:00
+
+      // Dec 16: starts at 05:00 UTC
+      for (let hour = 5; hour < 24; hour++) {
+        const hh = hour.toString().padStart(2, '0');
+        lines.push(logEntry(`2025-12-16T${hh}:00:00.000Z`, `Day16_${hh}: ${'x'.repeat(100)}`));
+      }
+
+      const content = lines.join('\n') + '\n';
+      const { file, size } = await createTestFile('regression_large_gap.log', content);
+
+      // Target: Dec 15 23:00 UTC
+      // Binary search will land somewhere in the Dec 15 20:30 burst
+      // 256KB linear scan must be able to skip past all burst entries and find Dec 16
+      const target = new Date('2025-12-15T23:00:00.000Z');
+      const { firstLine } = await findOffsetForDate(file, target, size);
+
+      const entry = parseLogLine(firstLine);
+      // If this is null or entry is from Dec 15, the bug is reproduced!
+      expect(entry).not.toBeNull();
+
+      const entryDate = parseLogDate(entry!.time);
+      expect(entryDate).not.toBeNull();
+
+      // CRITICAL: Must find Dec 16 05:00, NOT stay stuck in Dec 15 burst
+      expect(compareDates(entryDate!, target)).toBeGreaterThanOrEqual(0);
+      expect(entryDate!.getUTCDate()).toBe(16);
+    });
+
+    // Test: large file (5MB+) with target near end and gap in timestamps
+    test('REGRESSION: large file - target 00:00 but first log at 05:00', async () => {
+      // Simulate: 612MB file = ~2.2M lines, ~280 bytes/line
+      // Test with: 5MB file = ~20K lines, ~250 bytes/line
+      const lines: string[] = [];
+
+      // Create many days of logs before "today" (Dec 16)
+      // Days 1-15: ~1300 entries/day = 19500 entries total
+      for (let day = 1; day <= 15; day++) {
+        for (let i = 0; i < 1300; i++) {
+          const hour = Math.floor(i / 60) % 24;
+          const min = i % 60;
+          const hh = hour.toString().padStart(2, '0');
+          const mm = min.toString().padStart(2, '0');
+          const dd = day.toString().padStart(2, '0');
+          // ~250 bytes per line
+          lines.push(logEntry(`2025-12-${dd}T${hh}:${mm}:00.000Z`, `Day${dd}_${hh}${mm}_${i}: ${'x'.repeat(170)}`));
+        }
+      }
+
+      // Dec 16: starts at 05:00 (gap from 00:00 to 05:00)
+      for (let i = 0; i < 500; i++) {
+        const hour = 5 + Math.floor(i / 60);
+        const min = i % 60;
+        if (hour >= 24) break;
+        const hh = hour.toString().padStart(2, '0');
+        const mm = min.toString().padStart(2, '0');
+        lines.push(logEntry(`2025-12-16T${hh}:${mm}:00.000Z`, `Day16_${hh}${mm}_${i}: ${'x'.repeat(170)}`));
+      }
+
+      const content = lines.join('\n') + '\n';
+      const { file, size } = await createTestFile('regression_large_gap.log', content);
+
+      // Verify file is large enough for real binary search
+      expect(size).toBeGreaterThan(4 * 1024 * 1024); // > 4MB
+
+      // Target: Dec 16 00:00 UTC (but first log is Dec 16 05:00)
+      const target = new Date('2025-12-16T00:00:00.000Z');
+      const t0 = performance.now();
+      const { firstLine } = await findOffsetForDate(file, target, size);
+      const elapsed = performance.now() - t0;
+
+      // Should be fast even for large file
+      expect(elapsed).toBeLessThan(100); // < 100ms
+
+      const entry = parseLogLine(firstLine);
+      expect(entry).not.toBeNull();
+
+      const entryDate = parseLogDate(entry!.time);
+      expect(entryDate).not.toBeNull();
+
+      // CRITICAL: Must find Dec 16 05:00 (first entry >= target)
+      expect(compareDates(entryDate!, target)).toBeGreaterThanOrEqual(0);
+      expect(entryDate!.getUTCDate()).toBe(16);
+      expect(entryDate!.getUTCHours()).toBe(5);
+    });
+
+    // Test: binary search lands too far from target, 256KB linear scan not enough
+    test('REGRESSION: linear scan chunk too small - should still find entry', async () => {
+      // Create file where:
+      // 1. Many short entries per second (high density)
+      // 2. Binary search might land 300KB before first matching entry
+      // 3. 256KB linear scan would miss the target
+      const lines: string[] = [];
+
+      // Dec 15: dense entries (many per minute) - creates ~800KB
+      for (let hour = 0; hour < 24; hour++) {
+        for (let min = 0; min < 60; min++) {
+          for (let sec = 0; sec < 10; sec++) {
+            const hh = hour.toString().padStart(2, '0');
+            const mm = min.toString().padStart(2, '0');
+            const ss = sec.toString().padStart(2, '0');
+            // Short entries ~60 bytes each, ~14400 entries = ~864KB for Dec 15
+            lines.push(logEntry(`2025-12-15T${hh}:${mm}:${ss}.000Z`, `D15_${hh}${mm}${ss}`));
+          }
+        }
+      }
+
+      // Dec 16: starts at 05:00
+      for (let hour = 5; hour < 24; hour++) {
+        for (let min = 0; min < 60; min++) {
+          const hh = hour.toString().padStart(2, '0');
+          const mm = min.toString().padStart(2, '0');
+          lines.push(logEntry(`2025-12-16T${hh}:${mm}:00.000Z`, `D16_${hh}${mm}`));
+        }
+      }
+
+      const content = lines.join('\n') + '\n';
+      const { file, size } = await createTestFile('regression_dense.log', content);
+
+      // Target: Dec 16 00:00 (but first log is Dec 16 05:00)
+      // Binary search might land deep in Dec 15, 256KB not enough to reach Dec 16
+      const target = new Date('2025-12-16T00:00:00.000Z');
+      const { firstLine } = await findOffsetForDate(file, target, size);
+
+      const entry = parseLogLine(firstLine);
+      expect(entry).not.toBeNull();
+
+      const entryDate = parseLogDate(entry!.time);
+      expect(entryDate).not.toBeNull();
+
+      // Must find Dec 16 entry, not stay stuck in Dec 15
+      expect(compareDates(entryDate!, target)).toBeGreaterThanOrEqual(0);
+      expect(entryDate!.getUTCDate()).toBe(16);
+    });
+
     // This test would have caught the original bug
     test('REGRESSION: large file with target date in first half', async () => {
       const lines: string[] = [];
