@@ -58,50 +58,25 @@ export function useLogs({ password, filter, autoRefresh = true, initialLogs }: U
   const eventSourceRef = useRef<EventSource | null>(null);
   const hasInitialLogs = useRef((initialLogs?.length || 0) > 0);
 
-  const fetchLogs = useCallback(async (skipIfHasLogs = false) => {
-    if (!password) {
-      setLoading(false);
-      return;
+  // Connect to SSE stream - it sends historical logs first, then real-time updates
+  const connectStream = useCallback(() => {
+    if (!password) return;
+
+    // Skip if we have SSR logs on first load
+    if (hasInitialLogs.current) {
+      hasInitialLogs.current = false;
+      // Still connect for real-time updates but don't show loading
+      if (!autoRefresh) return;
     }
 
-    // Skip fetch if we already have SSR logs (first load only)
-    if (skipIfHasLogs && hasInitialLogs.current) {
-      hasInitialLogs.current = false;
-      return;
+    // Close existing connection
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
     }
 
     setLoading(true);
     setError(null);
-
-    try {
-      const url = buildUrl('/api/logs', password, filter);
-      const res = await fetch(url);
-
-      if (!res.ok) {
-        if (res.status === 401) {
-          throw new Error('Invalid password');
-        }
-        const text = await res.text();
-        throw new Error(text || `HTTP ${res.status}`);
-      }
-
-      const data = await res.json();
-      setLogs(data.logs || []);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch logs');
-    } finally {
-      setLoading(false);
-    }
-  }, [password, filter]);
-
-  // Initial fetch and on filter change
-  useEffect(() => {
-    fetchLogs(true); // Skip if has initial SSR logs
-  }, [fetchLogs]);
-
-  // SSE streaming
-  useEffect(() => {
-    if (!autoRefresh || !password) return;
+    setLogs([]); // Clear logs, they'll stream in
 
     const url = buildUrl('/api/logs/stream', password, filter);
     const eventSource = new EventSource(url);
@@ -111,6 +86,7 @@ export function useLogs({ password, filter, autoRefresh = true, initialLogs }: U
       setStreaming(true);
     };
 
+    // Regular log entries
     eventSource.onmessage = (event) => {
       try {
         const entry = JSON.parse(event.data) as LogEntry;
@@ -120,22 +96,39 @@ export function useLogs({ password, filter, autoRefresh = true, initialLogs }: U
       }
     };
 
-    eventSource.onerror = () => {
+    // Historical logs finished loading
+    eventSource.addEventListener('historical-end', () => {
+      setLoading(false);
+    });
+
+    eventSource.onerror = (e) => {
       setStreaming(false);
+      setLoading(false);
+      // Don't show error if connection was closed normally (e.g., pagination mode)
+      if (eventSource.readyState !== EventSource.CLOSED) {
+        setError('Connection lost');
+      }
       eventSource.close();
     };
+  }, [password, filter, autoRefresh]);
+
+  // Connect on mount and when filter changes
+  useEffect(() => {
+    connectStream();
 
     return () => {
-      eventSource.close();
-      setStreaming(false);
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+        setStreaming(false);
+      }
     };
-  }, [autoRefresh, password, filter]);
+  }, [connectStream]);
 
   return {
     logs,
     loading,
     error,
-    refresh: () => fetchLogs(false),
+    refresh: connectStream,
     streaming,
   };
 }

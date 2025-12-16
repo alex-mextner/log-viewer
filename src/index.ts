@@ -115,7 +115,7 @@ const server = serve({
       },
     },
 
-    // SSE stream for real-time updates
+    // SSE stream - sends historical logs first, then real-time updates
     '/api/logs/stream': {
       async GET(req) {
         const url = new URL(req.url);
@@ -126,21 +126,50 @@ const server = serve({
         const encoder = new TextEncoder();
 
         let cleanup: (() => void) | null = null;
+        let cancelled = false;
 
         const stream = new ReadableStream({
-          start(controller) {
-            cleanup = tailLogs(
-              filter,
-              (entry) => {
+          async start(controller) {
+            // First: send historical logs
+            let historicalCount = 0;
+            try {
+              await streamLogs(filter, (entry) => {
+                if (cancelled) return;
+                historicalCount++;
                 const data = `data: ${JSON.stringify(entry)}\n\n`;
                 controller.enqueue(encoder.encode(data));
-              },
-              () => {
+              });
+
+              if (cancelled) return;
+
+              // Send marker that historical logs are done
+              controller.enqueue(encoder.encode(`event: historical-end\ndata: ${historicalCount}\n\n`));
+
+              // Real-time updates only if no limit (showing all) or viewing latest data
+              // With pagination, real-time doesn't make sense for older pages
+              if (filter.limit === undefined) {
+                cleanup = tailLogs(
+                  filter,
+                  (entry) => {
+                    if (cancelled) return;
+                    const data = `data: ${JSON.stringify(entry)}\n\n`;
+                    controller.enqueue(encoder.encode(data));
+                  },
+                  () => {
+                    controller.close();
+                  }
+                );
+              } else {
+                // Close stream after historical data when using pagination
                 controller.close();
               }
-            );
+            } catch (err) {
+              console.error('[SSE] Error streaming logs:', err);
+              controller.close();
+            }
           },
           cancel() {
+            cancelled = true;
             cleanup?.();
           },
         });
