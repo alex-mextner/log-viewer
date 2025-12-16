@@ -135,7 +135,12 @@ export function App({ initialLogs, initialPassword }: AppProps = {}) {
       </div>
 
       {/* Log viewer */}
-      <LogViewer logs={logs} loading={loading} streaming={streaming} />
+      <LogViewer
+        logs={logs}
+        loading={loading}
+        streaming={streaming}
+        showAutoScroll={params.limit === undefined && (!params.to || new Date(params.to) >= new Date())}
+      />
 
       {/* Pagination - bottom */}
       <div className="mt-4">

@@ -12,6 +12,7 @@ interface LogViewerProps {
   logs: LogEntry[];
   loading: boolean;
   streaming: boolean;
+  showAutoScroll?: boolean;
 }
 
 function formatTime(time: string): string {
@@ -58,7 +59,7 @@ function LogDetail({ entry, onClose }: { entry: LogEntry; onClose: () => void })
   );
 }
 
-export function LogViewer({ logs, loading, streaming }: LogViewerProps) {
+export function LogViewer({ logs, loading, streaming, showAutoScroll = false }: LogViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const [selectedEntry, setSelectedEntry] = useState<LogEntry | null>(null);
@@ -112,7 +113,7 @@ export function LogViewer({ logs, loading, streaming }: LogViewerProps) {
               Live
             </span>
           )}
-          {autoScroll && <span>Auto-scroll ON</span>}
+          {showAutoScroll && autoScroll && <span>Auto-scroll ON</span>}
         </div>
       </div>
 
