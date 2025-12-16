@@ -9,11 +9,13 @@ function parseFilter(url: URL): LogFilter {
   const to = url.searchParams.get('to');
   const level = url.searchParams.get('level');
   const limit = url.searchParams.get('limit');
+  const offset = url.searchParams.get('offset');
 
   if (from) filter.from = new Date(from);
   if (to) filter.to = new Date(to);
   if (level) filter.level = level.split(',');
   if (limit) filter.limit = parseInt(limit, 10);
+  if (offset) filter.offset = parseInt(offset, 10);
 
   return filter;
 }
@@ -162,6 +164,7 @@ const server = serve({
           return Response.json({
             logs: result.logs,
             count: result.logs.length,
+            total: result.total,
             hasMore: result.hasMore,
           });
         } catch (error) {

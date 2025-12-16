@@ -11,6 +11,7 @@ export interface LogFilter {
   to?: Date;
   level?: string[];
   limit?: number;
+  offset?: number;
 }
 
 const LOG_FILE_PATH = process.env.LOG_FILE_PATH || '';
@@ -130,7 +131,7 @@ export async function streamLogs(
   }
 }
 
-export async function readLogs(filter: LogFilter = {}): Promise<{ logs: LogEntry[]; hasMore: boolean }> {
+export async function readLogs(filter: LogFilter = {}): Promise<{ logs: LogEntry[]; hasMore: boolean; total: number }> {
   if (!LOG_FILE_PATH) {
     throw new Error('LOG_FILE_PATH not configured');
   }
@@ -149,6 +150,7 @@ export async function readLogs(filter: LogFilter = {}): Promise<{ logs: LogEntry
   };
 
   const limit = effectiveFilter.limit || 1000;
+  const offset = effectiveFilter.offset || 0;
   const matchedEntries: LogEntry[] = [];
   let buffer = '';
 
@@ -185,13 +187,13 @@ export async function readLogs(filter: LogFilter = {}): Promise<{ logs: LogEntry
     reader.releaseLock();
   }
 
-  // Return last N entries (most recent)
-  const startIdx = Math.max(0, matchedEntries.length - limit);
-  const logs = matchedEntries.slice(startIdx);
+  const total = matchedEntries.length;
+  const logs = matchedEntries.slice(offset, offset + limit);
 
   return {
     logs,
-    hasMore: matchedEntries.length > limit,
+    hasMore: offset + limit < total,
+    total,
   };
 }
 
