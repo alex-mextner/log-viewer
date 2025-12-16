@@ -83,6 +83,7 @@ const server = serve({
           password,
           cssPath,
           jsPath,
+          limit: filter.limit,
         });
         const t4 = performance.now();
         console.log(`[HTML] createAppStream + shell sent: ${(t4 - t3).toFixed(1)}ms, total before response: ${(t4 - t0).toFixed(1)}ms`);

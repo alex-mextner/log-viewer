@@ -99,10 +99,10 @@ function SSRLevelFilter() {
 
 const LIMIT_OPTIONS = [100, 500, 1000, 5000];
 
-// SSR pagination - must match client structure for hydration
+// SSR pagination - suppressHydrationWarning because client uses Button component with different attrs
 function SSRPagination({ total }: { total: number }) {
   return (
-    <div className="flex items-center gap-2 text-sm flex-wrap">
+    <div className="flex items-center gap-2 text-sm flex-wrap" suppressHydrationWarning>
       <span className="text-muted-foreground">{total} entries</span>
       <span className="text-muted-foreground">|</span>
       <span className="text-muted-foreground">Per page:</span>
@@ -147,8 +147,7 @@ function SSRApp({ logsCount }: SSRAppProps) {
           <SSRDateFilter />
           <SSRLevelFilter />
         </div>
-        {/* Pagination - top (will be hydrated with controls) */}
-        <SSRPagination total={logsCount} />
+        {/* Pagination rendered by client after hydration */}
       </div>
 
       {/* Log viewer - placeholder will be replaced with streamed content */}
@@ -158,10 +157,7 @@ function SSRApp({ logsCount }: SSRAppProps) {
         dangerouslySetInnerHTML={{ __html: LOGS_PLACEHOLDER }}
       />
 
-      {/* Pagination - bottom */}
-      <div className="mt-4">
-        <SSRPagination total={logsCount} />
-      </div>
+      {/* Pagination rendered by client after hydration */}
     </div>
   );
 }
@@ -170,6 +166,7 @@ export interface SSROptions {
   password: string;
   cssPath: string;
   jsPath: string;
+  limit?: number;
 }
 
 export interface SSRStreamContext {

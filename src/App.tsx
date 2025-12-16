@@ -20,6 +20,10 @@ export function App({ initialLogs, initialPassword }: AppProps = {}) {
   const [params, setParams] = useUrlParams();
   const [passwordInput, setPasswordInput] = useState(initialPassword || params.pwd || '');
   const [password, setPassword] = useState(initialPassword || params.pwd || '');
+  const [hydrated, setHydrated] = useState(false);
+
+  // Mark as hydrated after first render to enable client-only components
+  useEffect(() => setHydrated(true), []);
 
   const filter = useMemo(
     () => ({
@@ -118,15 +122,17 @@ export function App({ initialLogs, initialPassword }: AppProps = {}) {
           <LevelFilter selected={params.level || []} onChange={handleLevelChange} />
         </div>
 
-        {/* Pagination - top */}
-        <Pagination
-          total={logs.length}
-          limit={params.limit}
-          page={params.page}
-          loading={loading}
-          onLimitChange={handleLimitChange}
-          onPageChange={handlePageChange}
-        />
+        {/* Pagination - top (client-only to avoid hydration mismatch) */}
+        {hydrated && (
+          <Pagination
+            total={logs.length}
+            limit={params.limit}
+            page={params.page}
+            loading={loading}
+            onLimitChange={handleLimitChange}
+            onPageChange={handlePageChange}
+          />
+        )}
 
         {/* Error message */}
         {error && (
@@ -142,17 +148,19 @@ export function App({ initialLogs, initialPassword }: AppProps = {}) {
         showAutoScroll={params.limit === undefined && (!params.to || new Date(params.to) >= new Date())}
       />
 
-      {/* Pagination - bottom */}
-      <div className="mt-4">
-        <Pagination
-          total={logs.length}
-          limit={params.limit}
-          page={params.page}
-          loading={loading}
-          onLimitChange={handleLimitChange}
-          onPageChange={handlePageChange}
-        />
-      </div>
+      {/* Pagination - bottom (client-only to avoid hydration mismatch) */}
+      {hydrated && (
+        <div className="mt-4">
+          <Pagination
+            total={logs.length}
+            limit={params.limit}
+            page={params.page}
+            loading={loading}
+            onLimitChange={handleLimitChange}
+            onPageChange={handlePageChange}
+          />
+        </div>
+      )}
     </div>
   );
 }

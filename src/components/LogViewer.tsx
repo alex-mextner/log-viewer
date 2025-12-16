@@ -64,12 +64,12 @@ export function LogViewer({ logs, loading, streaming, showAutoScroll = false }: 
   const [autoScroll, setAutoScroll] = useState(true);
   const [selectedEntry, setSelectedEntry] = useState<LogEntry | null>(null);
 
-  // Auto-scroll when new logs arrive
+  // Auto-scroll when new logs arrive (only when showAutoScroll is enabled)
   useEffect(() => {
-    if (autoScroll && containerRef.current) {
+    if (showAutoScroll && autoScroll && containerRef.current) {
       containerRef.current.scrollTop = containerRef.current.scrollHeight;
     }
-  }, [logs, autoScroll]);
+  }, [logs, autoScroll, showAutoScroll]);
 
   // Detect manual scroll
   const handleScroll = () => {
