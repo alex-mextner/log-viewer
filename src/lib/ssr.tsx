@@ -160,6 +160,8 @@ export function createAppStream({ password, cssPath, jsPath }: SSROptions): {
 } {
   const encoder = new TextEncoder();
   let controller: ReadableStreamDefaultController<Uint8Array>;
+  const t0 = performance.now();
+  let logCount = 0;
 
   const stream = new ReadableStream<Uint8Array>({
     start(c) {
@@ -168,16 +170,23 @@ export function createAppStream({ password, cssPath, jsPath }: SSROptions): {
   });
 
   const sendStart = () => {
+    const tRender = performance.now();
     // Render shell with placeholder (logsCount will be updated at the end via JS)
     const shellHtml = renderToString(<SSRApp logsCount={0} />);
+    const renderTime = performance.now() - tRender;
     const [beforeLogs] = shellHtml.split(LOGS_PLACEHOLDER);
 
-    const docStart = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><link rel="icon" type="image/svg+xml" href="/logo.svg"/><title>Log Viewer</title><link rel="stylesheet" href="${cssPath}"/></head><body><div id="root">`;
+    const timing = `<!-- [SSR] stream created: ${(performance.now() - t0).toFixed(1)}ms, renderToString: ${renderTime.toFixed(1)}ms -->`;
+    const docStart = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><link rel="icon" type="image/svg+xml" href="/logo.svg"/><title>Log Viewer</title><link rel="stylesheet" href="${cssPath}"/></head>${timing}<body><div id="root">`;
 
     controller.enqueue(encoder.encode(docStart + beforeLogs));
   };
 
   const sendLogEntry = (entry: LogEntry) => {
+    logCount++;
+    if (logCount === 1) {
+      controller.enqueue(encoder.encode(`<!-- [SSR] first log: ${(performance.now() - t0).toFixed(1)}ms -->`));
+    }
     controller.enqueue(encoder.encode(logRowToHtml(entry)));
   };
 
@@ -185,8 +194,9 @@ export function createAppStream({ password, cssPath, jsPath }: SSROptions): {
     const shellHtml = renderToString(<SSRApp logsCount={0} />);
     const [, afterLogs] = shellHtml.split(LOGS_PLACEHOLDER);
 
+    const timing = `<!-- [SSR] stream end: ${(performance.now() - t0).toFixed(1)}ms, ${logsCount} entries -->`;
     // Password stored in data attribute for hydration
-    const docEnd = `${afterLogs}</div><script>window.__SSR_PASSWORD__="${password}";window.__SSR_LOGS_COUNT__=${logsCount};</script><script type="module" src="${jsPath}" async></script></body></html>`;
+    const docEnd = `${timing}${afterLogs}</div><script>window.__SSR_PASSWORD__="${password}";window.__SSR_LOGS_COUNT__=${logsCount};</script><script type="module" src="${jsPath}" async></script></body></html>`;
 
     controller.enqueue(encoder.encode(docEnd));
     controller.close();

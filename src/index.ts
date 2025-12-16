@@ -52,14 +52,21 @@ const server = serve({
     // Main page - SSR with streaming
     '/': {
       async GET(req) {
+        const t0 = performance.now();
         const url = new URL(req.url);
         const authError = checkAuth(url);
+        const t1 = performance.now();
         const { cssPath, jsPath } = await getAssets();
+        const t2 = performance.now();
         const password = url.searchParams.get('pwd') || '';
+
+        console.log(`[HTML] auth: ${(t1 - t0).toFixed(1)}ms, assets: ${(t2 - t1).toFixed(1)}ms`);
 
         // If no auth, serve login page
         if (authError) {
+          const tLogin0 = performance.now();
           const stream = await renderLoginPage(cssPath, jsPath);
+          console.log(`[HTML] renderLoginPage: ${(performance.now() - tLogin0).toFixed(1)}ms`);
           return new Response(stream, {
             headers: { 'Content-Type': 'text/html; charset=utf-8' },
           });
@@ -68,23 +75,33 @@ const server = serve({
         // SSR: stream logs as HTML line by line
         const filter = parseFilter(url);
 
+        const t3 = performance.now();
         const { stream, sendStart, sendLogEntry, sendEnd } = createAppStream({
           password,
           cssPath,
           jsPath,
         });
+        const t4 = performance.now();
+        console.log(`[HTML] createAppStream: ${(t4 - t3).toFixed(1)}ms, total before stream: ${(t4 - t0).toFixed(1)}ms`);
 
         // Start streaming in background
         (async () => {
           try {
+            const tStart = performance.now();
             sendStart();
+            console.log(`[HTML] sendStart (renderToString): ${(performance.now() - tStart).toFixed(1)}ms`);
 
             let count = 0;
+            const tLogs = performance.now();
             await streamLogs(filter, (entry) => {
+              if (count === 0) {
+                console.log(`[HTML] first log entry: ${(performance.now() - tLogs).toFixed(1)}ms after streamLogs start`);
+              }
               sendLogEntry(entry);
               count++;
             });
 
+            console.log(`[HTML] streamLogs complete: ${count} entries in ${(performance.now() - tLogs).toFixed(1)}ms`);
             sendEnd(count);
           } catch (err) {
             console.error('Error streaming logs:', err);
