@@ -22,16 +22,22 @@ export function getLogFilePath(): string {
 
 // Cache for file offset by date - speeds up repeated queries
 interface OffsetCache {
-  fromDate: string; // ISO date string (day precision)
+  fromTimestamp: number; // Full timestamp in ms for precise matching
   byteOffset: number;
-  firstLine: string; // For validation
+  validationLine: string; // First line at offset for validation
   fileSize: number; // Invalidate if file shrunk (rotation)
 }
 
 let offsetCache: OffsetCache | null = null;
 
-function getDateKey(date: Date): string {
-  return date.toISOString().slice(0, 10); // YYYY-MM-DD
+// Check if cached offset is still valid for this query
+function isCacheValidForDate(cache: OffsetCache, fromDate: Date): boolean {
+  // Cache is valid if:
+  // 1. Cached fromTimestamp <= requested fromTimestamp (we can start from earlier point)
+  // 2. Difference is less than 1 hour (don't use cache from days ago)
+  const requestedTime = fromDate.getTime();
+  const timeDiff = requestedTime - cache.fromTimestamp;
+  return timeDiff >= 0 && timeDiff < 3600000; // Within 1 hour
 }
 
 // Binary search to find byte offset where entries >= targetDate start
@@ -41,67 +47,84 @@ async function findOffsetForDate(file: ReturnType<typeof Bun.file>, targetDate: 
 
   let low = 0;
   let high = fileSize;
-  let resultOffset = 0;
-  let resultLine = '';
+  let bestOffset = 0;
+  let bestLine = '';
   let iterations = 0;
 
-  // Binary search
-  while (low < high) {
+  // Binary search for first entry >= targetDate
+  while (high - low > 65536) { // Stop when range is small enough to scan linearly
     iterations++;
     const mid = Math.floor((low + high) / 2);
 
-    // Read a chunk around mid to find a complete line
-    const chunkStart = Math.max(0, mid - 512);
-    const chunkSize = Math.min(2048, fileSize - chunkStart);
-    const chunk = await file.slice(chunkStart, chunkStart + chunkSize).text();
+    // Read chunk starting from mid, find first complete line
+    const chunkSize = Math.min(4096, fileSize - mid);
+    const chunk = await file.slice(mid, mid + chunkSize).text();
+    const newlinePos = chunk.indexOf('\n');
 
-    // Find line boundaries
-    const lines = chunk.split('\n');
-
-    // If we started mid-line, skip first partial line (unless at file start)
-    const startIdx = chunkStart === 0 ? 0 : 1;
-
-    if (lines.length <= startIdx) {
-      // No complete lines in chunk, move right
-      low = mid + 1;
+    if (newlinePos === -1) {
+      high = mid;
       continue;
     }
 
-    const line = lines[startIdx];
+    // Get the line AFTER the newline (first complete line)
+    const lineStart = mid + newlinePos + 1;
+    const restOfChunk = chunk.slice(newlinePos + 1);
+    const nextNewline = restOfChunk.indexOf('\n');
+    const line = nextNewline === -1 ? restOfChunk : restOfChunk.slice(0, nextNewline);
+
     if (!line.trim()) {
-      low = mid + 1;
+      high = mid;
       continue;
     }
 
-    // Parse line to get timestamp
     const entry = parseLogLine(line);
-    if (!entry) {
-      low = mid + 1;
+    if (!entry?.time) {
+      high = mid;
       continue;
     }
 
     const entryTime = new Date(entry.time).getTime();
 
-    // Calculate actual byte offset of this line
-    let lineOffset = chunkStart;
-    for (let i = 0; i < startIdx; i++) {
-      lineOffset += lines[i].length + 1; // +1 for newline
-    }
-
     if (entryTime < targetTime) {
-      // This entry is before target, search right
-      low = lineOffset + line.length + 1;
+      // Entry is before target, search in right half
+      low = lineStart;
     } else {
-      // This entry is >= target, could be our answer, search left
+      // Entry is >= target, this could be our answer, search left for earlier match
       high = mid;
-      resultOffset = lineOffset;
-      resultLine = line;
+      bestOffset = lineStart;
+      bestLine = line;
     }
   }
 
-  console.log(`[binarySearch] found offset ${resultOffset} in ${iterations} iterations, ${(performance.now() - t0).toFixed(1)}ms`);
+  // Linear scan in the remaining small range to find exact position
+  if (bestOffset === 0 || low < bestOffset) {
+    const scanStart = low;
+    const scanChunk = await file.slice(scanStart, Math.min(scanStart + 65536 * 2, fileSize)).text();
+    const lines = scanChunk.split('\n');
 
-  return { offset: resultOffset, firstLine: resultLine };
+    let offset = scanStart;
+    for (const line of lines) {
+      if (!line.trim()) {
+        offset += line.length + 1;
+        continue;
+      }
+      const entry = parseLogLine(line);
+      if (entry?.time) {
+        const entryTime = new Date(entry.time).getTime();
+        if (entryTime >= targetTime) {
+          bestOffset = offset;
+          bestLine = line;
+          break;
+        }
+      }
+      offset += line.length + 1;
+    }
+  }
+
+  const foundEntry = parseLogLine(bestLine);
+  console.log(`[binarySearch] found offset ${bestOffset} in ${iterations} iterations, ${(performance.now() - t0).toFixed(1)}ms, first entry: ${foundEntry?.time || 'none'}`);
+
+  return { offset: bestOffset, firstLine: bestLine };
 }
 
 // Align offset to line boundary (read backwards to find newline)
@@ -196,21 +219,20 @@ export async function streamLogs(
   };
 
   const fromDate = effectiveFilter.from!;
-  const fromDateKey = getDateKey(fromDate);
 
   // Try to use cached offset
   let startOffset = 0;
   let cacheHit = false;
 
-  if (offsetCache && offsetCache.fromDate === fromDateKey && offsetCache.fileSize <= fileSize) {
+  if (offsetCache && offsetCache.fileSize <= fileSize && isCacheValidForDate(offsetCache, fromDate)) {
     // Validate cache - check if line at offset is still the same
-    const validationChunk = await file.slice(offsetCache.byteOffset, offsetCache.byteOffset + offsetCache.firstLine.length + 100).text();
+    const validationChunk = await file.slice(offsetCache.byteOffset, offsetCache.byteOffset + offsetCache.validationLine.length + 100).text();
     const firstLine = validationChunk.split('\n')[0];
 
-    if (firstLine === offsetCache.firstLine) {
+    if (firstLine === offsetCache.validationLine) {
       startOffset = offsetCache.byteOffset;
       cacheHit = true;
-      console.log(`[streamLogs] cache HIT for ${fromDateKey}, offset=${startOffset}`);
+      console.log(`[streamLogs] cache HIT, offset=${startOffset}, cached=${new Date(offsetCache.fromTimestamp).toISOString()}, requested=${fromDate.toISOString()}`);
     } else {
       console.log(`[streamLogs] cache INVALID (line changed), will binary search`);
       offsetCache = null;
@@ -227,9 +249,9 @@ export async function streamLogs(
     // Update cache
     if (firstLine) {
       offsetCache = {
-        fromDate: fromDateKey,
+        fromTimestamp: fromDate.getTime(),
         byteOffset: offset,
-        firstLine,
+        validationLine: firstLine,
         fileSize,
       };
     }
