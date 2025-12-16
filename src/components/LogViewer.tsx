@@ -91,7 +91,7 @@ export function LogViewer({ logs, loading, streaming }: LogViewerProps) {
       <div
         ref={containerRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-auto bg-background border rounded"
+        className={`flex-1 overflow-auto bg-background border rounded transition-opacity duration-200 ${loading ? 'opacity-60' : 'opacity-100'}`}
       >
         {logs.length === 0 ? (
           <div className="p-4 text-center text-muted-foreground">No logs found</div>

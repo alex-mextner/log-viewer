@@ -4,13 +4,14 @@ interface PaginationProps {
   total: number;
   limit?: number;
   page?: number;
+  loading?: boolean;
   onLimitChange: (limit: number | undefined) => void;
   onPageChange: (page: number) => void;
 }
 
 const LIMIT_OPTIONS = [100, 500, 1000, 5000];
 
-export function Pagination({ total, limit, page = 1, onLimitChange, onPageChange }: PaginationProps) {
+export function Pagination({ total, limit, page = 1, loading, onLimitChange, onPageChange }: PaginationProps) {
   const hasLimit = limit !== undefined;
   const totalPages = hasLimit ? Math.ceil(total / limit) : 1;
   const currentPage = hasLimit ? Math.min(page, totalPages) || 1 : 1;
@@ -77,6 +78,11 @@ export function Pagination({ total, limit, page = 1, onLimitChange, onPageChange
       >
         All
       </Button>
+
+      {/* Loading indicator */}
+      {loading && (
+        <span className="text-muted-foreground animate-pulse ml-2">Loading...</span>
+      )}
     </div>
   );
 }

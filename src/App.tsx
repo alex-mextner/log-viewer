@@ -123,6 +123,7 @@ export function App({ initialLogs, initialPassword }: AppProps = {}) {
           total={logs.length}
           limit={params.limit}
           page={params.page}
+          loading={loading}
           onLimitChange={handleLimitChange}
           onPageChange={handlePageChange}
         />
@@ -142,6 +143,7 @@ export function App({ initialLogs, initialPassword }: AppProps = {}) {
           total={logs.length}
           limit={params.limit}
           page={params.page}
+          loading={loading}
           onLimitChange={handleLimitChange}
           onPageChange={handlePageChange}
         />
