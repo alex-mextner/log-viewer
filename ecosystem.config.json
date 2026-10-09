@@ -6,7 +6,7 @@
       "interpreter": "/var/www/.bun/bin/bun",
       "env": {
         "NODE_ENV": "production",
-        "PORT": "3001"
+        "PORT": "3002"
       },
       "max_memory_restart": "200M",
       "watch": false,
